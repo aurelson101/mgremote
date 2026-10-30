@@ -27,7 +27,7 @@ public sealed partial class MainWindow
     {
         string query = _search.Text?.Trim() ?? "";
         var items = new List<TreeViewItem>();
-        var root = new TreeViewItem { Header = "Connexions", Tag = Array.Empty<string>(), IsExpanded = true, ItemsSource = items };
+        var root = new TreeViewItem { Header = TreeHeader("Connexions", "Folder"), Tag = Array.Empty<string>(), IsExpanded = true, ItemsSource = items };
         _folderNodes.Clear(); _nodes.Clear(); _folderNodes[FolderKey([])] = root;
         TreeViewItem EnsureFolder(string[] path)
         {
@@ -35,7 +35,7 @@ public sealed partial class MainWindow
             for (int i = 0; i < path.Length; i++) {
                 string[] prefix = path.Take(i + 1).ToArray(); string key = FolderKey(prefix);
                 if (!_folderNodes.TryGetValue(key, out var folder)) {
-                    folder = new TreeViewItem { Header = "▸ " + path[i], Tag = prefix, IsExpanded = true, ItemsSource = new List<TreeViewItem>() };
+                    folder = new TreeViewItem { Header = TreeHeader(path[i], "Folder"), Tag = prefix, IsExpanded = true, ItemsSource = new List<TreeViewItem>() };
                     ((List<TreeViewItem>)parent.ItemsSource!).Add(folder); _folderNodes.Add(key, folder);
                 }
                 parent = folder;
@@ -46,7 +46,7 @@ public sealed partial class MainWindow
         foreach (var c in _connections) {
             if (query.Length > 0 && !c.Name.Contains(query, StringComparison.OrdinalIgnoreCase) && !c.Host.Contains(query, StringComparison.OrdinalIgnoreCase) && !string.Join(" > ", c.FolderPath).Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
             var parent = EnsureFolder(c.FolderPath);
-            var node = new TreeViewItem { Header = c.Protocol + " · " + c.Name, Tag = c };
+            var node = new TreeViewItem { Header = TreeHeader(c.Name, c.Protocol, c.Protocol == "RDP" && c.Domain.Length > 0 && c.User.Length > 0 ? c.Domain + "\\" + c.User : c.User), Tag = c };
             ((List<TreeViewItem>)parent.ItemsSource!).Add(node); _nodes.Add(c, node);
         }
         _list.ItemsSource = new[] { root };
@@ -65,10 +65,15 @@ public sealed partial class MainWindow
             if (sftp && model.Protocol != "SSH") throw new ArgumentException("SFTP nécessite SSH.");
             if (sftp) { AddSession(new SessionTab("SFTP · " + model.Name, new FileTransferPane(model, () => UnlockConnection(model)))); return; }
             if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux X11/XWayland.");
-            if (model.Protocol == "RDP" && model.MultiMonitor) throw new NotSupportedException("Le multi-écran utilise encore Sessions → Ouvrir en fenêtre externe.");
             credentials = await UnlockConnection(model);
             if (_closing) throw new OperationCanceledException();
             var ownedCredentials = credentials;
+            if (model.Protocol == "RDP" && model.MultiMonitor) {
+                var start = SessionLauncher.ExternalStart(model); ownedCredentials?.Configure(start, "RDP");
+                var external = new ExternalSession(start);
+                AddSession(new SessionTab(model.Name + " · Multi-écran", external, Credentials: ownedCredentials)); credentials = null;
+                _status.Text = "RDP multi-écran ouvert en fenêtre native ; fermez son onglet pour arrêter la session."; return;
+            }
             var status = new TextBlock { Text = "Initialisation…", Margin = new Thickness(8), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
             var native = new EmbeddedSession(parent => { var start = SessionLauncher.Embedded(model, sftp, parent); ownedCredentials?.Configure(start, model.Protocol); return start; }, text => { status.Text = text; _status.Text = text; });
             var content = new Grid { RowDefinitions = new RowDefinitions("*,Auto") }; content.Children.Add(native); Grid.SetRow(status, 1); content.Children.Add(status);
@@ -93,13 +98,15 @@ public sealed partial class MainWindow
     internal async Task VerifyEmbeddedSessions()
     {
         if (!OperatingSystem.IsLinux()) return;
-        EmbeddedSession Fixture() => new(parent => SessionLauncher.Terminal(parent, Path.Combine(AppContext.BaseDirectory, "MGRemoteLinux"), new[] { "--terminal-fixture" }), _ => { });
-        var first = Fixture(); var second = Fixture();
+        string report = Path.Combine(Path.GetTempPath(), "mgremote-clipboard-" + Guid.NewGuid().ToString("N"));
+        EmbeddedSession Fixture(bool record) => new(parent => SessionLauncher.Terminal(parent, Path.Combine(AppContext.BaseDirectory, "MGRemoteLinux"), record ? new[] { "--terminal-fixture", "--fixture-output=" + report } : new[] { "--terminal-fixture" }), _ => { });
+        var first = Fixture(true); var second = Fixture(false);
         var a = new SessionTab("Native fixture A", first, first); var b = new SessionTab("Native fixture B", second, second);
         try {
             AddSession(a); var deadline = DateTime.UtcNow.AddSeconds(12);
             while ((first.ProcessId == 0 || first.ChildWindows == 0) && DateTime.UtcNow < deadline) await Task.Delay(100);
             if (!first.ProcessRunning || first.ChildWindows == 0) throw new Exception("First terminal did not embed.");
+            await VerifyClipboard(first.ProcessId, report);
             AddSession(b); deadline = DateTime.UtcNow.AddSeconds(12);
             while ((second.ProcessId == 0 || second.ChildWindows == 0) && DateTime.UtcNow < deadline) await Task.Delay(100);
             if (!second.ProcessRunning || second.ChildWindows == 0 || !first.ProcessRunning) throw new Exception("Switching tabs destroyed a terminal.");

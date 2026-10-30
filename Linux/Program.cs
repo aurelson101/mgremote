@@ -17,7 +17,11 @@ internal static class Program
         if (args.Length > 0 && args[0] is "--credential-askpass" or "--credential-rdp") { Environment.ExitCode = CredentialBroker.RunHelper(args).GetAwaiter().GetResult(); return; }
         if (args.Contains("--credential-stdin-fixture")) { Environment.ExitCode = Console.ReadLine() == "fixture-password" && Environment.GetEnvironmentVariable("MGREMOTE_CREDENTIAL_TOKEN") == null ? 0 : 2; return; }
         if (args.Contains("--self-test")) { SelfTest.Run(); return; }
-        if (args.Contains("--terminal-fixture")) { Console.Write("\x1b[32mMGRemote embedded terminal fixture\x1b[0m\r\n"); while (Console.ReadLine() is string line) Console.WriteLine(line); return; }
+        if (args.Contains("--terminal-fixture")) {
+            string? report = args.FirstOrDefault(a => a.StartsWith("--fixture-output="));
+            Console.Write("\x1b[32mMGRemote embedded terminal fixture\x1b[0m\r\n");
+            while (Console.ReadLine() is string line) { if (report != null) File.AppendAllText(report["--fixture-output=".Length..], line + "\n"); Console.WriteLine(line); } return;
+        }
         string? serialPlan = args.FirstOrDefault(a => a.StartsWith("--serial-plan=", StringComparison.Ordinal));
         if (serialPlan != null) { Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(SessionLauncher.Arguments(new Connection { Protocol = "Serial", Host = serialPlan[14..] }))); return; }
         AppBuilder.Configure<App>().UsePlatformDetect().StartWithClassicDesktopLifetime(args);
@@ -36,6 +40,7 @@ public sealed class App : Application
                     var window = desktop.MainWindow;
                     ((MainWindow)window).VerifyProtocolPortEditing();
                     ((MainWindow)window).VerifyTreeActions();
+                    await ((MainWindow)window).VerifyDesktopUi();
                     await ((MainWindow)window).VerifyEmbeddedSessions();
                     if (window.Bounds.Width < 760 || window.Bounds.Height < 500) throw new Exception("Window layout failed.");
                     using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)window.Bounds.Width, (int)window.Bounds.Height));
@@ -84,7 +89,7 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.4"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.5"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = Brush.Parse("#eef1f5"); Foreground = Brush.Parse("#1f2937");
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu();
@@ -95,7 +100,7 @@ public sealed partial class MainWindow : Window
             Group("Sessions", Entry("Connecter", () => Launch(false)), Entry("Transfert SFTP", () => Launch(true)), Entry("Ouvrir en fenêtre externe", External), Entry("Fermer la session", () => CloseSession(_tabBar.SelectedItem as SessionTab))),
             Group("Affichage", Entry("Accueil", () => _tabBar.SelectedItem = _tabs.FirstOrDefault())),
             Group("Outils", Entry("Console série", () => { New(); _protocol.SelectedIndex = 2; _host.Focus(); }), Entry("Choisir une clé SSH…", async () => await ChooseKey())),
-            Group("Aide", Entry("Informations", () => _tabBar.SelectedItem = _tabs.FirstOrDefault()))
+            Group("Aide", Entry("Guide d’utilisation", ShowHelp), Entry("À propos…", async () => await ShowAbout()))
         };
         root.Children.Add(menus);
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(8, 5) };

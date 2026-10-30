@@ -48,7 +48,10 @@ internal static class SelfTest
         var roundtrip = System.Text.Json.JsonSerializer.Deserialize<Connection>(System.Text.Json.JsonSerializer.Serialize(serial))!;
         Check(roundtrip.Protocol == "Serial" && roundtrip.Host == serial.Host && roundtrip.BaudRate == 9600);
         var rdp = SessionLauncher.Arguments(new Connection { Host = "2001:db8::1", Protocol = "RDP", Port = 3389, Clipboard = true, MultiMonitor = true });
-        Check(rdp.Contains("/v:[2001:db8::1]:3389") && rdp.Contains("/sec:nla") && rdp.Contains("+clipboard") && rdp.Contains("/multimon"));
+        Check(rdp.Contains("/v:[2001:db8::1]:3389") && rdp.Contains("/sec:nla") && rdp.Contains("+clipboard") && rdp.Contains("/multimon") && rdp.Contains("/f"));
+        var privateRdp = SessionLauncher.Arguments(new Connection { Host = "server", Protocol = "RDP", Port = 3389, Clipboard = false, MultiMonitor = false });
+        Check(privateRdp.Contains("-clipboard") && !privateRdp.Contains("+clipboard") && !privateRdp.Contains("/multimon") && !privateRdp.Contains("/f"));
+        Check(SessionLauncher.ClipboardTranslations.Contains("copy-selection(CLIPBOARD)") && SessionLauncher.ClipboardTranslations.Contains("insert-selection(CLIPBOARD)"));
         Check(!rdp.Any(s => s.StartsWith("/p:") || s.Contains("ignore") || s.StartsWith("/drive:")));
         string share = Path.Combine(Path.GetTempPath(), "rdp shared folder");
         var rdpShare = new Connection { Protocol = "RDP", Host = "rdp.example.invalid", Port = 3389, RdpShareEnabled = true, RdpSharePath = share };

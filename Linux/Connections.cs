@@ -199,6 +199,7 @@ public static class Connections
 
 public static class SessionLauncher
 {
+    internal const string ClipboardTranslations = "XTerm*VT100.translations: #override\\n Ctrl Shift <Key>C: copy-selection(CLIPBOARD)\\n Ctrl Shift <Key>V: insert-selection(CLIPBOARD)";
     public static List<string> Arguments(Connection c, bool sftp = false)
     {
         Connections.Validate(c);
@@ -217,7 +218,7 @@ public static class SessionLauncher
             rdp.Add("/bpp:" + c.ColorDepth); rdp.Add("/audio-mode:" + c.AudioMode);
             if (c.ConsoleSession) rdp.Add("/admin");
             if (c.GatewayHost.Length > 0) rdp.Add("/gateway:g:" + c.GatewayHost + ",usage-method:" + c.GatewayMode);
-            if (c.MultiMonitor) rdp.Add("/multimon");
+            if (c.MultiMonitor) rdp.AddRange(["/multimon", "/f"]);
             if (c.RdpShareEnabled) rdp.Add("/drive:MGRemote," + Path.GetFullPath(c.RdpSharePath));
             return rdp; // Certificate verification is retained; no password or redirected drives.
         }
@@ -249,6 +250,7 @@ public static class SessionLauncher
         string terminal = Find("gnome-terminal", "konsole", "xfce4-terminal", "xterm");
         var start = new ProcessStartInfo(terminal) { UseShellExecute = false };
         string name = Path.GetFileName(terminal);
+        if (name == "xterm") foreach (var arg in new[] { "-hold", "-xrm", "XTerm*allowWindowOps: false", "-xrm", ClipboardTranslations }) start.ArgumentList.Add(arg);
         start.ArgumentList.Add(name == "gnome-terminal" ? "--" : name == "xfce4-terminal" ? "--execute" : "-e");
         start.ArgumentList.Add(executable);
         foreach (string argument in Arguments(c, sftp)) start.ArgumentList.Add(argument);
@@ -271,6 +273,15 @@ public static class SessionLauncher
         }
     }
     private static string Executable(Connection c, bool sftp) => c.Protocol == "Serial" ? Find("picocom") : c.Protocol == "RDP" ? Find("xfreerdp3", "xfreerdp") : Find(sftp ? "sftp" : "ssh");
+    internal static ProcessStartInfo ExternalStart(Connection c)
+    {
+        ValidateIdentity(c);
+        if (c.Protocol != "RDP") throw new ArgumentException("Session externe gérée réservée à RDP.");
+        var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
+        start.ArgumentList.Add("-hold"); start.ArgumentList.Add("-e"); start.ArgumentList.Add(Executable(c, false));
+        foreach (var arg in Arguments(c)) start.ArgumentList.Add(arg);
+        return start;
+    }
     public static ProcessStartInfo Embedded(Connection c, bool sftp, uint parent)
     {
         ValidateIdentity(c);
@@ -286,7 +297,7 @@ public static class SessionLauncher
         var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
         start.ArgumentList.Add("-hold"); // Keep connection errors/output readable after the client exits.
         start.ArgumentList.Add("-xrm"); start.ArgumentList.Add("XTerm*allowWindowOps: false");
-        foreach (string arg in new[] { "-into", parent.ToString(System.Globalization.CultureInfo.InvariantCulture), "-bg", "#181a1f", "-fg", "#e6e6e6", "-fa", "Monospace", "-fs", "11", "-sl", "5000", "-xrm", "XTerm*VT100.translations: #override\\n Ctrl Shift <Key>C: copy-selection(CLIPBOARD)\\n Ctrl Shift <Key>V: insert-selection(CLIPBOARD)", "-e", executable }) start.ArgumentList.Add(arg);
+        foreach (string arg in new[] { "-into", parent.ToString(System.Globalization.CultureInfo.InvariantCulture), "-bg", "#181a1f", "-fg", "#e6e6e6", "-fa", "Monospace", "-fs", "11", "-sl", "5000", "-xrm", ClipboardTranslations, "-e", executable }) start.ArgumentList.Add(arg);
         foreach (var arg in arguments) start.ArgumentList.Add(arg);
         return start;
     }

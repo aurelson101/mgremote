@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.4 â€” work in progress
+# MGRemote Linux Desktop 0.2.5 â€” work in progress
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -46,3 +46,9 @@ Direct RDP uses FreeRDP /from-stdin:force through a child process with a private
 Right-click the root, a folder or a connection to create a folder or connection, edit/rename, duplicate, connect, use SFTP or delete as applicable. Right-click selects its target before opening the menu. F2 edits/renames; Insert creates a connection. New connections appear immediately as drafts; configure the host/protocol and save in the Configuration panel before connecting. Empty folders are persisted and imported from XML. Renaming a folder updates descendant paths while retaining encrypted credential fields. Folder deletion is limited to empty folders to prevent unintended subtree removal.
 
 The local store now uses a versioned document holding both connections and folders. Existing JSON array profiles remain readable and are converted on the next save. Older AppImages cannot read the new format; back up connections.json before upgrading if you need to downgrade. Invalid/unknown storage versions block writes. GUI tests operate on an isolated temporary profile and cover menu actions, selection, draft validation, renaming, empty-folder persistence and deletion safety.
+
+## Development update 0.2.5: desktop usability
+
+Folder, Windows/RDP, Linux/SSH and serial vector icons identify tree entries; configured usernames are visible alongside connection names (RDP includes the domain). These indicate connection types, not remote OS discovery. Help now opens an offline guide and About dialog. SSH terminal text uses Ctrl+Shift+C/V; files/folders use SFTP. RDP clipboard is enabled per connection and may be restricted by the server; use explicit folder redirection for file access.
+
+Selecting multimonitor RDP and connecting now opens a managed native fullscreen FreeRDP window with /multimon and /f, while its MGRemote tab owns process cleanup. Credentials may be unlocked for direct RDP as with embedded sessions; gateway/MFA handling remains manual. Physical monitor layouts, DPI/hot-plug, server-side clipboard redirection and real remote authentication remain unverified. CI includes a real local X11 clipboard/embedded-PTY test (copy from terminal and paste into terminal), plus external-process shutdown tests; this is not an end-to-end remote-server test. xclip/xdotool are test dependencies only.
