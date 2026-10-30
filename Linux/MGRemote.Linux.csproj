@@ -6,10 +6,15 @@
     <Nullable>enable</Nullable>
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AssemblyName>MGRemoteLinux</AssemblyName>
-    <Version>0.1.2</Version>
+    <Version>0.2.6</Version>
   </PropertyGroup>
   <ItemGroup>
+    <None Update="mgremote-askpass" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
   </ItemGroup>
+  <Target Name="MakeAskpassExecutable" AfterTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <Exec Command="chmod 755 &quot;$(TargetDir)mgremote-askpass&quot;" />
+  </Target>
 </Project>
