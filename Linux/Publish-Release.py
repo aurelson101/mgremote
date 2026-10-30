@@ -1,9 +1,8 @@
 """Publish the validated artifact from this workflow run; no personal credentials."""
-import os, json, pathlib, hashlib, urllib.request, urllib.error, urllib.parse, zipfile, io, base64
+import os, json, pathlib, hashlib, urllib.request, urllib.error, urllib.parse, zipfile, io, base64, time
 
 repo = os.environ['GITHUB_REPOSITORY']
-run_id = os.environ['GITHUB_RUN_ID']
-commit = os.environ['GITHUB_SHA']
+run_id = os.environ.get('VALIDATED_RUN_ID') or os.environ['GITHUB_RUN_ID']
 token = os.environ['GH_TOKEN']
 version = '0.2.5'
 tag = 'linux-v' + version
@@ -26,8 +25,15 @@ def api(path, method='GET', body=None, raw=False):
         data = response.read()
     return data if raw else json.loads(data) if data else None
 
-jobs = api('/actions/runs/' + run_id + '/jobs')['jobs']
-assert any(j['name'] == 'linux' and j['conclusion'] == 'success' for j in jobs), 'Validation job must pass first'
+assert run_id.isdigit()
+source_run = api('/actions/runs/' + run_id)
+assert source_run['head_repository']['full_name'] == repo and source_run['head_branch'] == 'linux-desktop-parity' and source_run['event'] == 'workflow_dispatch', 'Artifact must come from the trusted development branch'
+commit = source_run['head_sha']
+for attempt in range(15):
+    jobs = api('/actions/runs/' + run_id + '/jobs?filter=all&per_page=100')['jobs']
+    if any(j['name'] == 'linux' and j['conclusion'] == 'success' for j in jobs): break
+    time.sleep(2)
+else: raise RuntimeError('Validation job must pass first')
 artifact = next(a for a in api('/actions/runs/' + run_id + '/artifacts')['artifacts'] if a['name'] == 'mgremote-linux-validated')
 assert not artifact['expired']
 destination = pathlib.Path('validated-release')

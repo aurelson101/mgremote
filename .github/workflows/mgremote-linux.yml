@@ -6,11 +6,15 @@ on:
         description: Publish the validated Linux preview and retire the previous Linux release/tag
         type: boolean
         default: false
+      publish_run_id:
+        description: Existing run with successful Linux validation (empty builds a new artifact)
+        type: string
+        default: ''
 permissions:
   contents: read
 jobs:
   publish-release:
-    if: inputs.publish
+    if: ${{ !cancelled() && inputs.publish && (needs.linux.result == 'success' || inputs.publish_run_id != '') }}
     needs: linux
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -24,8 +28,10 @@ jobs:
       - name: Publish verified Linux artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          VALIDATED_RUN_ID: ${{ inputs.publish_run_id }}
         run: python3 Linux/Publish-Release.py
   linux:
+    if: inputs.publish_run_id == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
