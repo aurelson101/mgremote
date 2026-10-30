@@ -21,8 +21,14 @@ def api(path, method='GET', body=None, raw=False):
     headers = {'Authorization': 'Bearer ' + token, 'User-Agent': 'MGRemote-release', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
     if body is not None: headers['Content-Type'] = 'application/json'
     request = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), headers=headers, method=method)
-    with opener.open(request, timeout=120) as response:
-        data = response.read()
+    try:
+        with opener.open(request, timeout=120) as response: data = response.read()
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            try: message = json.loads(error.read()).get('message', 'GitHub rejected the request')
+            except (ValueError, UnicodeError): message = 'GitHub rejected the request'
+            print('GitHub API ' + method + ': ' + str(error.code) + ' - ' + message, flush=True)
+        raise
     return data if raw else json.loads(data) if data else None
 
 assert run_id.isdigit()
@@ -66,9 +72,8 @@ Validation: 102 offline Linux checks, actual X11 clipboard copying from the embe
 RDP clipboard options are checked, but server redirection/policies, real remote authentication/transfers, physical multimonitor layouts, mixed DPI and hot-plug remain unverified. Unsigned development preview with incomplete Windows parity. Profile format and encrypted-secret restrictions are unchanged from 0.2.4. See the versioned Linux/README.md for requirements.
 '''
 notes += '\n[Ubuntu validation](https://github.com/' + repo + '/actions/runs/' + run_id + ')\n'
-try: release = api('/releases/tags/' + tag)
-except urllib.error.HTTPError as error:
-    if error.code != 404: raise
+release = next((r for r in api('/releases?per_page=100') if r['tag_name'] == tag), None)
+if release is None:
     release = api('/releases', 'POST', {'tag_name': tag, 'target_commitish': commit, 'name': 'MGRemote Linux Desktop ' + version + ' - Development preview', 'body': notes, 'draft': True, 'prerelease': True, 'make_latest': 'false'})
 assert release['target_commitish'] == commit, 'Existing tag belongs to another build'
 for path in [image, source, manifest_path, proof, destination / 'linux-gui.png']:
