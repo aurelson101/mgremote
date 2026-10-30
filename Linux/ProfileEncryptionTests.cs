@@ -20,6 +20,15 @@ internal static class ProfileEncryptionTests
         try {
             Connections.Save([item], [["Empty"]], file);
             Check(!ProfileEncryption.IsEncryptedFile(file) && Connections.LoadStore(file).Items.Single().User == item.User, "plaintext compatibility");
+            var firstReader = Connections.LoadStore(file); var secondReader = Connections.LoadStore(file);
+            string changedRevision = Connections.Save([item with { Description = "another instance" }], dataPath: file, expectedRevision: firstReader.Revision);
+            string changed = File.ReadAllText(file);
+            Refused<IOException>(() => Connections.Save(secondReader.Items, dataPath: file, expectedRevision: secondReader.Revision), "stale plaintext editor overwrote another instance");
+            Check(File.ReadAllText(file) == changed && changedRevision == Connections.LoadStore(file).Revision && !changed.Contains("Revision"), "revision guard changed the file or leaked internal metadata");
+            File.Delete(file);
+            Refused<IOException>(() => Connections.Save([item], dataPath: file, expectedRevision: changedRevision), "stale editor recreated a deleted profile");
+            Check(!File.Exists(file), "deleted profile was recreated");
+            Connections.Save([item], [["Empty"]], file, expectedRevision: "missing");
             using var key = ProfileEncryption.CreateKey("synthetic profile phrase 123");
             Connections.Save([item], [["Empty"]], file, key);
             string encrypted = File.ReadAllText(file);
@@ -36,8 +45,12 @@ internal static class ProfileEncryptionTests
             using var unlocked = ProfileEncryption.Unlock(envelope.RootElement, "synthetic profile phrase 123");
             var loaded = Connections.LoadStore(file, unlocked);
             Check(loaded.Items.Single().Host == item.Host && loaded.Items.Single().EncryptedPassword == item.EncryptedPassword && loaded.Folders.Any(p => p.SequenceEqual(new[] { "Empty" })), "encrypted round trip lost settings or nested secrets");
-            Connections.Save(loaded.Items, loaded.Folders, file, unlocked);
+            Connections.Save(loaded.Items, loaded.Folders, file, unlocked, loaded.Revision);
             Check(File.ReadAllText(file) != encrypted, "save reused the GCM nonce");
+            string fresh = File.ReadAllText(file);
+            Refused<IOException>(() => Connections.Save(loaded.Items, loaded.Folders, file, unlocked, loaded.Revision), "stale encrypted editor overwrote a newer save");
+            Check(File.ReadAllText(file) == fresh, "stale encrypted save changed ciphertext");
+            Console.WriteLine("PASS: two-reader stale-save rejection for plaintext/encrypted profiles, deleted-profile protection and revision refresh without persisted metadata.");
             var modified = JsonNode.Parse(encrypted)!;
             byte[] tag = Convert.FromBase64String(modified["Tag"]!.GetValue<string>()); tag[0] ^= 1;
             modified["Tag"] = Convert.ToBase64String(tag);

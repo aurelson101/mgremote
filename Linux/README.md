@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.8 — development preview
+# MGRemote Linux Desktop 0.2.9 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -76,3 +76,9 @@ File → Verrouiller le profil closes the application-owned sessions/transfers, 
 Search is debounced and retains collapsed folders, selection and unsaved editor text. Searching temporarily opens matching branches; clearing it restores the previous tree state.
 
 Explicit external windows now have an owning tab, including SSH and serial. Destination SSH clients disable X11 forwarding, GSSAPI credential delegation, connection multiplexing and post-authentication backgrounding. Existing user-managed bastion masters/configuration remain independent and are not shut down by MGRemote. Host-key verification, NLA and RDP certificate checks remain enabled. Live remote authentication still requires a server pilot.
+
+## Development update 0.2.9: stale-save and tab lifecycle fixes
+
+The editor keeps the revision read from disk and rejects a save if another instance/program has changed or deleted the profile. Restart MGRemote to load the new version; unsaved edits are not written over it. Saving authenticates the existing profile once and compares its revision immediately before replacement instead of decrypting it twice. This detects stale editors and changes observed during save; it is not a cross-process database transaction. The on-disk format is unchanged.
+
+Closing a background tab preserves the active session; closing the active tab selects its neighbor. Manual profile locking waits for application-owned clients and SFTP shutdown before reporting completion, and reports unconfirmed shutdown separately.

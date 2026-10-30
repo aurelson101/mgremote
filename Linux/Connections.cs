@@ -177,13 +177,17 @@ public static class Connections
     {
         if (path == null || path.Length > 128 || path.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 256 || p.Any(char.IsControl))) throw new ArgumentException("Dossier de connexion invalide.");
     }
-    public sealed record Store(int Version, Connection[] Items, string[][] Folders);
+    public sealed record Store(int Version, Connection[] Items, string[][] Folders)
+    {
+        [System.Text.Json.Serialization.JsonIgnore] public string Revision { get; init; } = "missing";
+    }
     public static List<Connection> Load() => LoadStore().Items.ToList();
     public static Store LoadStore(string? dataPath = null, ProfileKey? profileKey = null)
     {
         string file = dataPath ?? DataPath;
         string content;
         try { content = ProfileEncryption.ReadProfileText(file); } catch (FileNotFoundException) { return new Store(1, [], []); }
+        string revision = ProfileEncryption.Revision(content);
         using (var envelope = JsonDocument.Parse(content)) {
             if (ProfileEncryption.IsEnvelope(envelope.RootElement)) content = ProfileEncryption.Decode(envelope.RootElement, profileKey);
             else if (System.Text.Encoding.UTF8.GetByteCount(content) > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Fichier de connexions trop volumineux.");
@@ -195,11 +199,11 @@ public static class Connections
         if (store.Version != 1 || store.Items == null || store.Folders == null) throw new InvalidDataException("Version de stockage non prise en charge ou données incomplètes.");
         foreach (var item in store.Items) Validate(item, allowDraft: true);
         foreach (var path in store.Folders) { ValidateFolderPath(path); if (path.Length == 0) throw new InvalidDataException("Dossier racine explicite invalide."); }
-        return store with { Folders = store.Folders.Concat(store.Items.Select(c => c.FolderPath))
+        return store with { Revision = revision, Folders = store.Folders.Concat(store.Items.Select(c => c.FolderPath))
             .SelectMany(path => Enumerable.Range(1, path.Length).Select(length => path.Take(length).ToArray()))
             .DistinctBy(path => JsonSerializer.Serialize(path)).ToArray() };
     }
-    public static void Save(IEnumerable<Connection> connections, IEnumerable<string[]>? folders = null, string? dataPath = null, ProfileKey? profileKey = null)
+    public static string Save(IEnumerable<Connection> connections, IEnumerable<string[]>? folders = null, string? dataPath = null, ProfileKey? profileKey = null, string? expectedRevision = null)
     {
         var items = connections.ToArray(); foreach (var item in items) Validate(item, allowDraft: true);
         var paths = (folders ?? []).ToArray(); foreach (var path in paths) { ValidateFolderPath(path); if (path.Length == 0) throw new ArgumentException("Dossier racine explicite invalide."); }
@@ -207,7 +211,8 @@ public static class Connections
         string folder = Path.GetDirectoryName(file)!;
         ProfileEncryption.RejectLinkedPath(file);
         // Existing encrypted bytes must authenticate with this key before replacement, even during encryption setup.
-        LoadStore(file, profileKey);
+        string originalRevision = LoadStore(file, profileKey).Revision;
+        if (expectedRevision != null && originalRevision != expectedRevision) throw new IOException("Le profil a été modifié par un autre programme. Relancez MGRemote pour recharger ses changements avant d’enregistrer.");
         string content = JsonSerializer.Serialize(new Store(1, items, paths), new JsonSerializerOptions { WriteIndented = true });
         if (System.Text.Encoding.UTF8.GetByteCount(content) > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Profil trop volumineux.");
         if (profileKey != null) content = ProfileEncryption.Encode(content, profileKey);
@@ -222,9 +227,10 @@ public static class Connections
                 stream.Flush(flushToDisk: true);
             }
             ProfileEncryption.RejectLinkedPath(file);
-            LoadStore(file, profileKey);
+            if (ProfileEncryption.ReadRevision(file) != originalRevision) throw new IOException("Le profil a changé pendant l’enregistrement. Le fichier existant est conservé ; relancez MGRemote pour le recharger.");
             File.Move(temporary, file, true);
         } finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return ProfileEncryption.Revision(content);
     }
 }
 

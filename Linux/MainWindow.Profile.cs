@@ -11,6 +11,7 @@ namespace MGRemote.Linux;
 public sealed partial class MainWindow
 {
     private ProfileKey? _profileKey;
+    private string _profileRevision = "missing";
     private bool _profileBusy;
     private Control? _profileEditor;
     private readonly MenuItem _lockProfileItem = new() { Header = "Verrouiller le profil…", IsEnabled = false };
@@ -39,6 +40,7 @@ public sealed partial class MainWindow
             var store = await Task.Run(() => Connections.LoadStore(_dataPath, candidate));
             if (_closing) return;
             _profileKey?.Dispose(); _profileKey = candidate; candidate = null;
+            _profileRevision = store.Revision;
             _connections.Clear(); foreach (var item in store.Items) _connections.Add(item);
             _folders.Clear(); _folders.AddRange(store.Folders); _storeLoaded = true;
             Filter(); New(); UpdateProfileActions();
@@ -66,12 +68,20 @@ public sealed partial class MainWindow
         actions.Children.Add(Button("Annuler", () => dialog.Close(false))); actions.Children.Add(Button("Verrouiller", () => dialog.Close(true)));
         panel.Children.Add(actions); dialog.Content = panel; dialog.Opened += (_, _) => opened?.Invoke(dialog);
         if (!await dialog.ShowDialog<bool>(this) || _closing) return;
-        foreach (var tab in _tabs.Where(t => t.Closable).ToArray()) CloseSession(tab);
+        _profileBusy = true;
+        var sessions = _tabs.Where(t => t.Closable).ToArray();
+        foreach (var tab in sessions) CloseSession(tab);
         _profileKey.Dispose(); _profileKey = null; _storeLoaded = false;
         _connections.Clear(); _folders.Clear(); _selectedFolder = []; _search.Text = ""; ForgetTreeState();
         Filter(); New(); UpdateProfileActions();
         _configurationTitle.Text = "Configuration · Profil verrouillé";
-        _status.Text = "Profil verrouillé — Fichier → Chiffrer / déverrouiller le profil pour le rouvrir.";
+        _status.Text = "Profil verrouillé — arrêt des processus gérés…";
+        try {
+            await Task.WhenAll(sessions.Select(SessionShutdown)).WaitAsync(TimeSpan.FromSeconds(6));
+            _status.Text = "Profil verrouillé — Fichier → Chiffrer / déverrouiller le profil pour le rouvrir.";
+        } catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception) {
+            _status.Text = "Profil verrouillé, mais l’arrêt d’un client n’est pas confirmé. Vérifiez les fenêtres et processus restants.";
+        } finally { _profileBusy = false; UpdateProfileActions(); }
     }
     private async Task<ProfileKey?> AskProfileUnlock(Action<Window>? opened = null)
     {
@@ -127,7 +137,7 @@ public sealed partial class MainWindow
             try {
                 candidate = await Task.Run(() => ProfileEncryption.CreateKey(phrase));
                 if (closed || _closing) return;
-                Connections.Save(_connections, _folders, _dataPath, candidate);
+                _profileRevision = Connections.Save(_connections, _folders, _dataPath, candidate, _profileRevision);
                 _profileKey = candidate; candidate = null;
                 UpdateProfileActions();
                 _status.Text = "Profil complet chiffré — déverrouillage requis au prochain démarrage.";
@@ -146,13 +156,14 @@ public sealed partial class MainWindow
     internal async Task VerifyProfileUi()
     {
         if (!App.Smoke) throw new InvalidOperationException("Synthetic profile UI checks require --smoke-ui.");
-        var previousItems = _connections.ToArray(); var previousFolders = _folders.ToArray(); bool previousLoaded = _storeLoaded;
+        var previousItems = _connections.ToArray(); var previousFolders = _folders.ToArray(); bool previousLoaded = _storeLoaded; string previousRevision = _profileRevision;
         void Click(Window dialog, string content) => dialog.GetLogicalDescendants().OfType<Button>().Single(button => button.Content?.ToString() == content).RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
         const string phrase = "synthetic GUI profile phrase";
         try {
             var fixture = new Connection { Name = "Profile UI fixture", Host = "profile.example" };
             _connections.Clear(); _connections.Add(fixture); _folders.Clear(); _storeLoaded = true;
             Connections.Save([fixture], dataPath: _dataPath); string plain = File.ReadAllText(_dataPath);
+            _profileRevision = Connections.LoadStore(_dataPath).Revision;
             await OfferProfileEncryption(dialog => Click(dialog, "Plus tard — continuer sans chiffrement"));
             if (_profileKey != null || File.ReadAllText(_dataPath) != plain) throw new Exception("Skipping profile encryption changed the profile.");
             await OfferProfileEncryption(dialog => {
@@ -182,7 +193,8 @@ public sealed partial class MainWindow
             if (!_storeLoaded || _profileKey == null) throw new Exception("Canceling profile lock changed the active profile.");
             var start = new System.Diagnostics.ProcessStartInfo(SessionLauncher.Find("sleep")) { UseShellExecute = false }; start.ArgumentList.Add("60");
             var owned = new ExternalSession(start); AddSession(new SessionTab("Lock fixture", owned));
-            await LockProfile(dialog => Click(dialog, "Verrouiller")); await owned.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+            await LockProfile(dialog => Click(dialog, "Verrouiller"));
+            if (!owned.ShutdownCompletion.IsCompletedSuccessfully) throw new Exception("Profile lock returned before owned process shutdown completed.");
             bool alive; try { using var process = System.Diagnostics.Process.GetProcessById(owned.ProcessId); alive = !process.HasExited; } catch (ArgumentException) { alive = false; }
             if (alive || _profileKey != null || _storeLoaded || _connections.Count != 0 || _folders.Count != 0 || _tabs.Any(t => t.Closable) || Read().Host.Length > 0 || _profileEditor?.IsEnabled != false) throw new Exception("Profile lock retained client, key or editable connection data.");
             blocked = false; try { Persist([]); } catch (IOException) { blocked = true; }
@@ -192,7 +204,7 @@ public sealed partial class MainWindow
             Console.WriteLine("PASS: manual profile lock cancellation, owned-process shutdown, in-memory key/editor cleanup and locked launch/write guards.");
             Console.WriteLine("PASS: optional startup profile dialog skip/encrypt, close during key derivation preserves plaintext, canceled unlock write block and successful profile unlock; temporary profile only.");
         } finally {
-            _profileKey?.Dispose(); _profileKey = null; _storeLoaded = previousLoaded;
+            _profileKey?.Dispose(); _profileKey = null; _storeLoaded = previousLoaded; _profileRevision = previousRevision;
             _connections.Clear(); foreach (var item in previousItems) _connections.Add(item);
             _folders.Clear(); _folders.AddRange(previousFolders); Filter(); New(); UpdateProfileActions(); CleanupSmokeStore();
         }

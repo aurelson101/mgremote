@@ -20,6 +20,8 @@ public sealed class FileTransferPane : UserControl, IDisposable
     private CancellationTokenSource? _cancel;
     private EmbeddedSession? _session;
     private bool _busy, _disposed;
+    private Task _operation = Task.CompletedTask;
+    internal Task ShutdownCompletion { get; private set; } = Task.CompletedTask;
     internal FileTransferPane(Connection connection, Func<Task<CredentialBroker?>>? unlock = null)
     {
         _connection = connection; _unlock = unlock;
@@ -30,7 +32,7 @@ public sealed class FileTransferPane : UserControl, IDisposable
         var actions = new WrapPanel { Orientation = Orientation.Horizontal };
         var browse = new Button { Content = "Parcourir…", Margin = new Thickness(0, 0, 8, 0) }; browse.Click += async (_, _) => await Browse();
         var stop = new Button { Content = "Annuler / fermer le transfert", Margin = new Thickness(8, 0, 0, 0) }; stop.Click += async (_, _) => await Cancel();
-        _start.Click += async (_, _) => await Start(); actions.Children.Add(browse); actions.Children.Add(_start); actions.Children.Add(stop); form.Children.Add(actions);
+        _start.Click += async (_, _) => { _operation = Start(); await _operation; }; actions.Children.Add(browse); actions.Children.Add(_start); actions.Children.Add(stop); form.Children.Add(actions);
         form.Children.Add(new TextBlock { Text = "Téléchargement dans un nouveau sous-dossier. Les fichiers partiels sont conservés en cas d’annulation. Le terminal ci-dessous affiche la progression et les demandes d’authentification.", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         form.Children.Add(_destination); root.Children.Add(new ScrollViewer { Content = form, MaxHeight = 320 }); _status.Margin = new Thickness(0, 10); Grid.SetRow(_status, 1); root.Children.Add(_status);
         Grid.SetRow(_progress, 2); root.Children.Add(_progress); Content = root;
@@ -76,16 +78,36 @@ public sealed class FileTransferPane : UserControl, IDisposable
     {
         _credentials?.Dispose(); _credentials = null;
         _cancel?.Cancel(); var session = _session; _session = null; _progress.Content = null;
-        if (session != null) { session.Dispose(); await session.ShutdownCompletion; }
+        if (session != null) { session.Dispose(); ShutdownCompletion = session.ShutdownCompletion; await ShutdownCompletion; }
         if (!_disposed) { _start.IsEnabled = !_busy; _status.Text = "Session de transfert fermée. Les fichiers partiels sont conservés."; }
     }
     internal async Task VerifyValidation()
     {
         _direction.SelectedIndex = 1; await Start();
         if (_session != null || _status.Text?.Contains("chemin local") != true) throw new Exception("Transfer UI did not reject an empty path before any operation.");
+        string directory = Path.Combine(Path.GetTempPath(), "mgremote-transfer-cancel-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<CredentialBroker?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var pending = new FileTransferPane(new Connection { Name = "Cancellation fixture", Host = "fixture.example.invalid" }, () => { entered.TrySetResult(); return release.Task; });
+        try {
+            pending._direction.SelectedIndex = 1; pending._local.Text = directory; pending._remote.Text = "/fixture";
+            pending._operation = pending.Start();
+            await Task.WhenAny(entered.Task, pending._operation).WaitAsync(TimeSpan.FromSeconds(7));
+            if (!entered.Task.IsCompletedSuccessfully) throw new Exception("Local transfer preparation failed: " + pending._status.Text);
+            pending.Dispose();
+            if (pending.ShutdownCompletion.IsCompleted) throw new Exception("Transfer shutdown ignored pending authentication.");
+            release.TrySetResult(null); await pending.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(3));
+            if (pending._session != null || pending._credentials != null) throw new Exception("Canceled transfer created a client or retained credentials.");
+            Console.WriteLine("PASS: SFTP disposal waits for pending authentication and cancels before client creation; local preparation only.");
+        } finally {
+            release.TrySetResult(null); pending.Dispose(); await pending.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(3));
+            Directory.Delete(directory, recursive: true);
+        }
     }
     public void Dispose()
     {
         if (_disposed) return; _disposed = true; _cancel?.Cancel(); _session?.Dispose(); _credentials?.Dispose();
+        ShutdownCompletion = Task.WhenAll(_operation, _session?.ShutdownCompletion ?? ShutdownCompletion);
     }
 }

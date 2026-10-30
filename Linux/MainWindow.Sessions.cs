@@ -59,8 +59,29 @@ public sealed partial class MainWindow
     private void AddSession(SessionTab tab) { tab.Body.IsVisible = false; _sessionArea.Children.Add(tab.Body); _tabs.Add(tab); _tabBar.SelectedItem = tab; }
     private void CloseSession(SessionTab? tab)
     {
-        if (tab == null || !tab.Closable) return;
-        _sessionArea.Children.Remove(tab.Body); _tabs.Remove(tab); tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); _tabBar.SelectedItem = _tabs.LastOrDefault();
+        if (tab == null || !tab.Closable || !_tabs.Contains(tab)) return;
+        var selected = _tabBar.SelectedItem; int index = _tabs.IndexOf(tab);
+        _sessionArea.Children.Remove(tab.Body); _tabs.Remove(tab); tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose();
+        _tabBar.SelectedItem = ReferenceEquals(selected, tab) ? _tabs.ElementAtOrDefault(Math.Min(index, _tabs.Count - 1)) : selected;
+    }
+    private static Task SessionShutdown(SessionTab tab) => tab.Host?.ShutdownCompletion ?? tab.Body switch {
+        ExternalSession external => external.ShutdownCompletion,
+        FileTransferPane transfer => transfer.ShutdownCompletion,
+        _ => Task.CompletedTask
+    };
+    internal void VerifyTabClosing()
+    {
+        var first = new SessionTab("First fixture", new Border()); var background = new SessionTab("Background fixture", new Border()); var last = new SessionTab("Last fixture", new Border());
+        try {
+            AddSession(first); AddSession(background); AddSession(last); _tabBar.SelectedItem = first;
+            CloseSession(background);
+            if (!ReferenceEquals(_tabBar.SelectedItem, first) || !first.Body.IsVisible) throw new Exception("Closing a background tab changed the active session.");
+            CloseSession(first);
+            if (!ReferenceEquals(_tabBar.SelectedItem, last)) throw new Exception("Closing the active tab did not select its adjacent session.");
+            CloseSession(last); CloseSession(last);
+            if (_tabs.Any(t => t.Closable) || _tabBar.SelectedItem == null) throw new Exception("Closing the last session lost the home tab.");
+            Console.WriteLine("PASS: background-tab closure preserves the active session, adjacent selection and repeated close safety.");
+        } finally { CloseSession(first); CloseSession(background); CloseSession(last); }
     }
     private async void Launch(bool sftp)
     {

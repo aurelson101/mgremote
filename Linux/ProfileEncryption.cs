@@ -77,6 +77,12 @@ internal static class ProfileEncryption
         using var stream = OpenProfileRead(file);
         return ReadBoundedText(stream, MaxFile);
     }
+    internal static string Revision(string content) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+    internal static string ReadRevision(string file)
+    {
+        try { return Revision(ReadProfileText(file)); }
+        catch (FileNotFoundException) { return "missing"; }
+    }
     internal static string ReadBoundedText(Stream stream, int maximumBytes)
     {
         if (!stream.CanSeek) throw new IOException("Le profil doit être un fichier ordinaire.");

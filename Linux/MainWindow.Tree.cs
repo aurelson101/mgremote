@@ -59,7 +59,7 @@ public sealed partial class MainWindow
     private void Persist(IEnumerable<Connection> connections, IEnumerable<string[]>? folders = null)
     {
         if (!_storeLoaded) throw new IOException("Fichier existant non chargé : écriture bloquée pour préserver vos données.");
-        Connections.Save(connections, folders ?? _folders, _dataPath, _profileKey);
+        _profileRevision = Connections.Save(connections, folders ?? _folders, _dataPath, _profileKey, _profileRevision);
     }
     private void NewConnectionFromTree()
     {
@@ -162,6 +162,6 @@ public sealed partial class MainWindow
     private void CleanupSmokeStore()
     {
         if (!App.Smoke) return;
-        try { File.Delete(_dataPath); if (Directory.Exists(Path.GetDirectoryName(_dataPath))) Directory.Delete(Path.GetDirectoryName(_dataPath)!); } catch (IOException) { }
+        try { File.Delete(_dataPath); _profileRevision = "missing"; if (Directory.Exists(Path.GetDirectoryName(_dataPath))) Directory.Delete(Path.GetDirectoryName(_dataPath)!); } catch (IOException) { }
     }
 }

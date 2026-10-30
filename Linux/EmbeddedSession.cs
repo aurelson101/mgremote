@@ -129,7 +129,7 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
         if (process != null) {
             process.Exited -= ProcessExited;
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            ShutdownCompletion = Task.Run(async () => { try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception ex) when (ex is TimeoutException or InvalidOperationException) { } finally { process.Dispose(); } });
+            ShutdownCompletion = Task.Run(async () => { try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch (InvalidOperationException) when (_processId == 0) { } finally { process.Dispose(); } });
         }
         if (_connection != IntPtr.Zero) { if (_window != 0) xcb_destroy_window(_connection, _window); xcb_flush(_connection); xcb_disconnect(_connection); _connection = IntPtr.Zero; _window = 0; }
     }
