@@ -20,38 +20,37 @@ public sealed partial class MainWindow
     private readonly Expander _sshSection = new() { Header = "SSH · Authentification et tunnel", IsExpanded = true, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Expander _rdpSection = new() { Header = "RDP · Affichage et redirections", IsExpanded = true, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly List<Expander> _propertyGroups = [];
-    private readonly TextBlock _configurationTitle = new() { Text = "Configuration", FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 8) };
+    private readonly TextBlock _configurationTitle = new() { Text = "Configuration", FontWeight = FontWeight.SemiBold, Margin = new Thickness(8, 4), TextTrimming = TextTrimming.CharacterEllipsis };
 
     private void AddPropertyGroup(Panel parent, string title, Control content)
     {
         var group = new Expander { Header = title, IsExpanded = true, Content = content, HorizontalAlignment = HorizontalAlignment.Stretch };
-        _propertyGroups.Add(group); parent.Children.Add(group);
+        CompactCategory(group); _propertyGroups.Add(group); parent.Children.Add(group);
     }
     private Control BuildSshProperties()
     {
-        var fields = new StackPanel { Spacing = 5 };
-        Add(fields, "Clé privée", _key);
-        fields.Children.Add(Button("Choisir une clé privée…", async () => await ChooseKey()));
-        Add(fields, "Certificat SSH", _certificate);
-        fields.Children.Add(Button("Choisir un certificat…", async () => {
+        var fields = new StackPanel { Spacing = 0 };
+        Add(fields, "Clé privée", BrowseField(_key, "Choisir une clé privée SSH", async () => await ChooseKey()));
+        Add(fields, "Certificat SSH", BrowseField(_certificate, "Choisir un certificat SSH", async () => {
             try {
                 var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Certificat public OpenSSH", AllowMultiple = false });
                 if (files.Count > 0) _certificate.Text = files[0].TryGetLocalPath();
             } catch (Exception ex) { _status.Text = ex.Message; }
         }));
         Add(fields, "Bastion / saut", _jump);
-        fields.Children.Add(new TextBlock { Text = "Alias OpenSSH : utilisateur, port et clé du bastion se règlent dans ~/.ssh/config.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.SlateGray, FontSize = 11 });
+        fields.Children.Add(new TextBlock { Text = "Alias OpenSSH : utilisateur, port et clé du bastion se règlent dans ~/.ssh/config.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.SlateGray, FontSize = 11, Margin = new Thickness(7, 4) });
         fields.Children.Add(_tunnel);
         Add(fields, "Port local", _tunnelLocalPort); Add(fields, "Hôte distant", _tunnelHost); Add(fields, "Port distant", _tunnelRemotePort);
-        fields.Children.Add(new TextBlock { Text = "Écoute sur 127.0.0.1 uniquement, pendant la session SSH. L’hôte distant est vu depuis le serveur SSH. SFTP n’ouvre pas un second tunnel.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.SlateGray, FontSize = 11 });
+        fields.Children.Add(new TextBlock { Text = "Écoute sur 127.0.0.1 uniquement, pendant la session SSH. L’hôte distant est vu depuis le serveur SSH. SFTP n’ouvre pas un second tunnel.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.SlateGray, FontSize = 11, Margin = new Thickness(7, 4) });
         _tunnel.IsCheckedChanged += (_, _) => UpdateAdvancedProperties();
         return fields;
     }
     private Control PropertyToolbar()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6, 0, 6, 4) };
-        bar.Children.Add(Button("Déplier", () => { foreach (var group in _propertyGroups) group.IsExpanded = true; }));
-        bar.Children.Add(Button("Replier", () => { foreach (var group in _propertyGroups) group.IsExpanded = false; }));
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(3, 1) };
+        bar.Classes.Add("toolstrip");
+        bar.Children.Add(Button("Tout déplier", () => { foreach (var group in _propertyGroups) group.IsExpanded = true; }));
+        bar.Children.Add(Button("Tout replier", () => { foreach (var group in _propertyGroups) group.IsExpanded = false; }));
         return bar;
     }
     private void UpdateAdvancedProperties()

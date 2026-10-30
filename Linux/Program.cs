@@ -33,8 +33,8 @@ public sealed class App : Application
     public override void Initialize()
     {
         var theme = new FluentTheme();
-        theme.Palettes[Avalonia.Styling.ThemeVariant.Light] = new ColorPaletteResources { Accent = Color.Parse("#2563eb") };
-        Styles.Add(theme); RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light;
+        theme.Palettes[Avalonia.Styling.ThemeVariant.Light] = new ColorPaletteResources { Accent = Color.Parse("#62788d") };
+        Styles.Add(theme); RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light; DesktopAppearance.Apply(this);
     }
     public override void OnFrameworkInitializationCompleted()
     {
@@ -54,6 +54,7 @@ public sealed class App : Application
                     using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)window.Bounds.Width, (int)window.Bounds.Height));
                     image.Render((Visual)window.Content!);
                     image.Save(Environment.GetCommandLineArgs().Single(a => a.StartsWith("--smoke-ui="))[11..]);
+                    await ((MainWindow)window).VerifyCompactLayout(Environment.GetCommandLineArgs().Single(a => a.StartsWith("--smoke-ui="))[11..].Replace(".png", "-compact.png"));
                     Console.WriteLine("PASS: Linux prototype GUI rendered; user configuration untouched."); desktop.Shutdown();
                 } catch (Exception ex) { Console.Error.WriteLine(ex); desktop.Shutdown(1); }
             }, TimeSpan.FromSeconds(2));
@@ -69,12 +70,12 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _gateway = new() { PlaceholderText = "Passerelle.example:443 (facultatif)" };
     private readonly ComboBox _gatewayMode = new() { ItemsSource = new[] { "direct", "detect" }, SelectedIndex = 0 };
     private readonly TextBox _folder = new();
-    private readonly TextBox _description = new() { AcceptsReturn = true, MinHeight = 56, MaxHeight = 120, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBox _description = new() { AcceptsReturn = true, MinHeight = 42, MaxHeight = 64, TextWrapping = TextWrapping.Wrap };
     private readonly ComboBox _colors = new() { ItemsSource = new[] { 8, 15, 16, 24, 32 }, SelectedIndex = 4 };
     private readonly ComboBox _audio = new() { ItemsSource = new[] { "Sur cet ordinateur", "Sur le serveur", "Désactivé" }, SelectedIndex = 2 };
     private readonly CheckBox _console = new() { Content = "Session d’administration RDP (/admin)" };
     private readonly ObservableCollection<SessionTab> _tabs = [];
-    private readonly Avalonia.Controls.Primitives.TabStrip _tabBar = new();
+    private readonly Avalonia.Controls.Primitives.TabStrip _tabBar = new() { Height = 30, FontSize = 12 };
     private readonly Grid _sessionArea = new();
     private readonly Dictionary<Connection, TreeViewItem> _nodes = new(ReferenceEqualityComparer.Instance);
     private string[] _selectedFolder = [];
@@ -82,12 +83,12 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _name = new(), _host = new(), _user = new(), _domain = new(), _key = new();
     private readonly TextBox _jump = new() { PlaceholderText = "Alias Host dans ~/.ssh/config" }, _sharePath = new();
     private readonly CheckBox _share = new() { Content = "Partager ce dossier RDP en lecture/écriture" };
-    private readonly StackPanel _rdpFields = new() { Spacing = 5, IsVisible = false };
+    private readonly StackPanel _rdpFields = new() { Spacing = 0, IsVisible = false };
     private readonly NumericUpDown _port = new() { Minimum = 1, Maximum = 65535, Value = 22 };
     private readonly ComboBox _protocol = new() { ItemsSource = new[] { "SSH", "RDP", "Serial" }, SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly NumericUpDown _baud = new() { Minimum = 50, Maximum = 4000000, Value = 9600 }, _bits = new() { Minimum = 5, Maximum = 8, Value = 8 }, _stop = new() { Minimum = 1, Maximum = 2, Value = 1 };
     private readonly ComboBox _parity = new() { ItemsSource = new[] { "none", "even", "odd" }, SelectedIndex = 0 }, _flow = new() { ItemsSource = new[] { "none", "hardware", "software" }, SelectedIndex = 0 };
-    private readonly StackPanel _serialFields = new() { Spacing = 8, IsVisible = false };
+    private readonly StackPanel _serialFields = new() { Spacing = 0, IsVisible = false };
     private readonly TextBox _search = new() { Watermark = "Rechercher une connexion…" };
     private readonly Button _sftp;
     private readonly CheckBox _clipboard = new() { Content = "Presse-papiers RDP bidirectionnel (texte)" };
@@ -97,10 +98,10 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.6"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
-        Background = Brush.Parse("#eef1f5"); Foreground = Brush.Parse("#1f2937");
+        Title = "MGRemote — Linux Desktop 0.2.7"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
-        var menus = new Menu();
+        var menus = new Menu(); menus.Classes.Add("desktop-menu");
         MenuItem Entry(string title, Action action) { var item = new MenuItem { Header = title }; item.Click += (_, _) => action(); return item; }
         MenuItem Group(string title, params MenuItem[] items) => new() { Header = title, ItemsSource = items };
         menus.ItemsSource = new[] {
@@ -111,64 +112,67 @@ public sealed partial class MainWindow : Window
             Group("Aide", Entry("Guide d’utilisation", ShowHelp), Entry("À propos…", async () => await ShowAbout()))
         };
         root.Children.Add(menus);
-        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(8, 5) };
-        toolbar.Children.Add(new TextBlock { Text = "MGRemote", FontSize = 18, FontWeight = FontWeight.SemiBold, Margin = new Thickness(4, 0, 16, 4), VerticalAlignment = VerticalAlignment.Center });
-        toolbar.Children.Add(Button("＋ Connexion", NewConnectionFromTree)); toolbar.Children.Add(Button("Dossier", async () => await CreateFolderDialog())); toolbar.Children.Add(Button("Connecter", () => Launch(false)));
-        _sftp = Button("SFTP", () => Launch(true)); toolbar.Children.Add(_sftp); toolbar.Children.Add(Button("Importer…", async () => await Import()));
+        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(5, 3) }; toolbar.Classes.Add("toolstrip");
+        toolbar.Children.Add(ToolButton("Connexion", "Nouvelle connexion · Ctrl+N", "M2 2H13V18H2Z M6 7H17 M11 2V12", NewConnectionFromTree));
+        toolbar.Children.Add(ToolButton("Dossier", "Nouveau dossier", "M2 5H8L10 7H20V18H2Z", async () => await CreateFolderDialog()));
+        toolbar.Children.Add(new Border { Width = 1, Height = 18, Background = PanelLine, Margin = new Thickness(5, 0) });
+        toolbar.Children.Add(ToolButton("Connecter", "Ouvrir la connexion sélectionnée", "M6 3L17 10L6 17Z", () => Launch(false)));
+        _sftp = ToolButton("SFTP", "Transfert de fichiers", "M3 5H19 M15 1L19 5L15 9 M19 15H3 M7 11L3 15L7 19", () => Launch(true)); toolbar.Children.Add(_sftp);
+        toolbar.Children.Add(ToolButton("Importer", "Importer des connexions mRemoteNG", "M10 2V13 M5 8L10 13L15 8 M2 14V19H18V14", async () => await Import()));
         Grid.SetRow(toolbar, 1); root.Children.Add(toolbar);
-        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("380,5,*") }; Grid.SetRow(body, 2);
-        var sidebar = new Grid { RowDefinitions = new RowDefinitions("3*,5,4*") };
+        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("320,4,*") }; Grid.SetRow(body, 2);
+        body.ColumnDefinitions[0].MinWidth = 280; body.ColumnDefinitions[2].MinWidth = 420;
+        var sidebar = new Grid { RowDefinitions = new RowDefinitions("2*,4,3*") };
         var treePanel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Background = Brushes.White };
-        treePanel.Children.Add(new TextBlock { Text = "Connexions", FontWeight = FontWeight.SemiBold, Margin = new Thickness(8) });
-        _search.Margin = new Thickness(6); Grid.SetRow(_search, 1); treePanel.Children.Add(_search);
+        treePanel.Children.Add(DockTitle("Connexions"));
+        _search.Margin = new Thickness(5); _search.MinHeight = 26; _search.FontSize = 12; Grid.SetRow(_search, 1); treePanel.Children.Add(_search);
         Grid.SetRow(_list, 2); treePanel.Children.Add(_list); sidebar.Children.Add(treePanel);
         _list.SelectionChanged += (_, _) => { if (_list.SelectedItem is TreeViewItem item) { if (item.Tag is Connection connection) { _selectedFolder = connection.FolderPath; Edit(connection); } else if (item.Tag is string[] path) { _selectedFolder = path; _editing = null; _name.Text = _host.Text = ""; _folder.Text = string.Join(" > ", path); } } };
         _list.DoubleTapped += (_, _) => { if (_list.SelectedItem is TreeViewItem { Tag: Connection }) Launch(false); };
         InstallTreeMenu();
         _search.TextChanged += (_, _) => Filter();
-        var horizontal = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch }; Grid.SetRow(horizontal, 1); sidebar.Children.Add(horizontal);
+        var horizontal = new GridSplitter { Height = 4, Background = PanelLine, HorizontalAlignment = HorizontalAlignment.Stretch }; Grid.SetRow(horizontal, 1); sidebar.Children.Add(horizontal);
         var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Brushes.White };
-        editor.Children.Add(_configurationTitle);
+        editor.Classes.Add("properties"); editor.Children.Add(new Border { Background = DesktopAppearance.Chrome, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 0, 1), Child = _configurationTitle });
         var propertyToolbar = PropertyToolbar(); Grid.SetRow(propertyToolbar, 1); editor.Children.Add(propertyToolbar);
-        var fields = new StackPanel { Spacing = 5, Margin = new Thickness(6) };
-        var displayFields = new StackPanel { Spacing = 5 };
+        var fields = new StackPanel { Spacing = 0 };
+        var displayFields = new StackPanel { Spacing = 0 };
         AddPropertyGroup(fields, "Général", displayFields);
         Add(displayFields, "Nom", _name); Add(displayFields, "Dossier", _folder); _folder.PlaceholderText = "Groupe > Sous-groupe";
         Add(displayFields, "Icône", _icon); Add(displayFields, "Description", _description);
-        var connectionFields = new StackPanel { Spacing = 5 };
+        var connectionFields = new StackPanel { Spacing = 0 };
         AddPropertyGroup(fields, "Connexion", connectionFields);
         Add(connectionFields, "Protocole", _protocol); Add(connectionFields, "Hôte / IP / série", _host); Add(connectionFields, "Port réseau", _port);
         Add(connectionFields, "Utilisateur", _user); Add(connectionFields, "Domaine RDP", _domain);
-        _sshSection.Content = BuildSshProperties(); _propertyGroups.Add(_sshSection); fields.Children.Add(_sshSection);
+        _sshSection.Content = BuildSshProperties(); CompactCategory(_sshSection); _propertyGroups.Add(_sshSection); fields.Children.Add(_sshSection);
         Add(_serialFields, "Bauds", _baud); Add(_serialFields, "Bits", _bits); Add(_serialFields, "Parité", _parity); Add(_serialFields, "Stop", _stop); Add(_serialFields, "Flux", _flow); fields.Children.Add(_serialFields);
         _rdpFields.Children.Add(_clipboard); _rdpFields.Children.Add(_multi);
         Add(_rdpFields, "Résolution", _resolution); Add(_rdpFields, "Largeur", _rdpWidth); Add(_rdpFields, "Hauteur", _rdpHeight);
         _resolution.SelectionChanged += (_, _) => UpdateAdvancedProperties(); _multi.IsCheckedChanged += (_, _) => UpdateAdvancedProperties();
-        _rdpFields.Children.Add(_share); Add(_rdpFields, "Dossier partagé", _sharePath); _rdpFields.Children.Add(Button("Choisir le dossier RDP…", async () => await ChooseRdpFolder()));
+        _rdpFields.Children.Add(_share); Add(_rdpFields, "Dossier partagé", BrowseField(_sharePath, "Choisir le dossier partagé RDP", async () => await ChooseRdpFolder()));
         Add(_rdpFields, "Passerelle RDP", _gateway); Add(_rdpFields, "Mode passerelle", _gatewayMode);
         Add(_rdpFields, "Couleurs (bits)", _colors); Add(_rdpFields, "Son distant", _audio); _rdpFields.Children.Add(_console);
         _rdpFields.Children.Add(new TextBlock { Text = "Le serveur pourra lire et modifier ce dossier. Accès distant : \\" + "\\tsclient\\MGRemote. Aucun partage automatique des lecteurs.", TextWrapping = TextWrapping.Wrap });
-        _rdpSection.Content = _rdpFields; _propertyGroups.Add(_rdpSection); fields.Children.Add(_rdpSection);
+        _rdpSection.Content = _rdpFields; CompactCategory(_rdpSection); _propertyGroups.Add(_rdpSection); fields.Children.Add(_rdpSection);
         fields.Children.Add(Button("Secret importé…", async () => await RevealImportedSecret()));
-        var scroll = new ScrollViewer { Content = fields }; Grid.SetRow(scroll, 2); editor.Children.Add(scroll);
-        var editActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6), Spacing = 5 }; editActions.Children.Add(Button("Enregistrer", Save)); editActions.Children.Add(Button("Supprimer", async () => await Delete()));
+        var scroll = new ScrollViewer { Content = fields, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 2); editor.Children.Add(scroll);
+        var editActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(5, 4), Spacing = 4 }; editActions.Classes.Add("toolstrip"); editActions.Children.Add(Button("Enregistrer", Save)); editActions.Children.Add(Button("Supprimer", async () => await Delete()));
         Grid.SetRow(editActions, 3); editor.Children.Add(editActions); Grid.SetRow(editor, 2); sidebar.Children.Add(editor);
         body.Children.Add(sidebar);
-        var vertical = new GridSplitter { Width = 5, VerticalAlignment = VerticalAlignment.Stretch }; Grid.SetColumn(vertical, 1); body.Children.Add(vertical);
-        var sessions = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Background = Brush.Parse("#f7f8fa") };
+        var vertical = new GridSplitter { Width = 4, Background = PanelLine, VerticalAlignment = VerticalAlignment.Stretch }; Grid.SetColumn(vertical, 1); body.Children.Add(vertical);
+        var sessions = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Background = Brush.Parse("#f3f5f7") };
         _tabBar.ItemsSource = _tabs;
         _tabBar.ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<SessionTab>((tab, _) => {
             var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            header.Children.Add(new TextBlock { Text = tab!.Name, VerticalAlignment = VerticalAlignment.Center });
+            header.Children.Add(new TextBlock { Text = tab!.Name, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
             if (tab.Closable) { var close = new Button { Content = "×", Padding = new Thickness(5, 0) }; close.Click += (_, _) => CloseSession(tab); header.Children.Add(close); }
             return header;
         });
         _tabBar.SelectionChanged += (_, _) => { foreach (var tab in _tabs) tab.Body.IsVisible = ReferenceEquals(tab, _tabBar.SelectedItem); };
-        sessions.Children.Add(_tabBar); Grid.SetRow(_sessionArea, 1); sessions.Children.Add(_sessionArea);
+        sessions.Children.Add(new Border { Background = DesktopAppearance.Chrome, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 0, 1), Child = _tabBar }); Grid.SetRow(_sessionArea, 1); sessions.Children.Add(_sessionArea);
         Grid.SetColumn(sessions, 2); body.Children.Add(sessions); root.Children.Add(body);
-        var welcome = new Border { Padding = new Thickness(32), Child = new TextBlock { Text = "MGRemote\n\nToutes vos connexions, dans un même espace.\n\nOrganisez vos serveurs dans l’arborescence à gauche.\nSélectionnez une connexion pour régler ses propriétés,\npuis double-cliquez pour ouvrir son onglet.\n\nSSH · Clés privées, certificats, bastions et tunnels locaux.\nRDP · Résolution, passerelle, presse-papiers et dossier partagé.\nSFTP · Envoi et téléchargement de fichiers ou dossiers.\n\nCtrl+N : nouvelle connexion     Ctrl+S : enregistrer\nF2 : modifier     Inser : créer     Ctrl+Maj+C/V : terminal\n\nLe chiffrement du profil est disponible dans le menu Fichier.", FontSize = 16, TextWrapping = TextWrapping.Wrap } };
-        AddSession(new SessionTab("General", welcome, null, false));
-        Grid.SetRow(_status, 3); _status.Margin = new Thickness(8); root.Children.Add(_status); Content = root;
+        AddSession(new SessionTab("Général", EmptyWorkspace(), null, false));
+        Grid.SetRow(_status, 3); _status.Margin = new Thickness(8, 4); _status.FontSize = 11; root.Children.Add(_status); Content = root;
         Closed += (_, _) => { _closing = true; _profileKey?.Dispose(); foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } CleanupSmokeStore(); };
         _protocol.SelectionChanged += (_, _) => {
             UpdateProtocol();
@@ -181,10 +185,16 @@ public sealed partial class MainWindow : Window
     }
     private static Button Button(string title, Action action)
     {
-        var button = new Button { Content = title, Margin = new Thickness(0, 0, 8, 4), Background = Brush.Parse("#2563eb"), Foreground = Brushes.White };
+        var button = new Button { Content = title, Margin = new Thickness(0), Padding = new Thickness(8, 3), MinHeight = 26 };
         button.Click += (_, _) => action(); return button;
     }
-    private static void Add(Panel panel, string label, Control control) { var row = new Grid { ColumnDefinitions = new ColumnDefinitions("115,*") }; row.Children.Add(new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center }); Grid.SetColumn(control, 1); row.Children.Add(control); panel.Children.Add(row); }
+    private static void Add(Panel panel, string label, Control control)
+    {
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("110,*"), MinHeight = 26 };
+        row.Children.Add(new Border { Background = Brush.Parse("#f5f6f8"), BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 1, 0), Padding = new Thickness(8, 3), Child = new TextBlock { Text = label, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center } });
+        control.HorizontalAlignment = HorizontalAlignment.Stretch; control.VerticalAlignment = VerticalAlignment.Stretch; Grid.SetColumn(control, 1); row.Children.Add(control);
+        panel.Children.Add(new Border { BorderBrush = Brush.Parse("#e7eaee"), BorderThickness = new Thickness(0, 0, 0, 1), Child = row });
+    }
     private void New() { _encryptedPassword = ""; _gateway.Text = ""; _gatewayMode.SelectedIndex = 0; _description.Text = ""; _colors.SelectedItem = 32; _audio.SelectedIndex = 2; _console.IsChecked = false; _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = _share.IsChecked = false; _jump.Text = _sharePath.Text = ""; _folder.Text = string.Join(" > ", _selectedFolder); _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; ResetAdvancedProperties(); UpdateProtocol(); }
     private void UpdateProtocol()
     {

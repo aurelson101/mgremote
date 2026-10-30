@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.6 — development preview
+# MGRemote Linux Desktop 0.2.7 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -64,3 +64,7 @@ At startup an unencrypted profile offers **Chiffrer le profil** or **Plus tard �
 SSH properties support an optional OpenSSH public certificate, a private key, an existing OpenSSH bastion alias and one explicit local forward. The forward binds only 127.0.0.1 on a port from 1024 to 65535 and exists while its SSH session remains open; the remote host is resolved from the SSH server. SFTP uses the same identity/certificate/bastion without opening a duplicate local listener. This is not automatic RDP tunnel orchestration. SSH certificates use local absolute paths; PPK keys still need conversion.
 
 RDP resolution can follow the pane, use a fixed size, or open a managed native fullscreen window. Multiple monitors also use a managed native window and ignore fixed-size settings. NLA and certificate checks remain enabled. Live SSH/certificate/bastion/tunnel/RDP authentication and physical monitors still require a real-server pilot; synthetic tests do not establish server compatibility.
+
+## Development update 0.2.7: compact desktop appearance
+
+Neutral gray toolbars, small vector toolbar icons, muted selection colors and compact property-table rows replace the saturated buttons and card-style sections. The tree/configuration sidebar is narrower and resizable; session tabs use normal desktop text sizes and the empty workspace is deliberately quiet. UI rendering is checked at 1280×850 and 900×600; connection, tunnel and encryption behavior is unchanged.
