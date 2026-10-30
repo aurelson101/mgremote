@@ -45,6 +45,7 @@ public sealed class App : Application
                     var window = desktop.MainWindow;
                     ((MainWindow)window).VerifyProtocolPortEditing();
                     ((MainWindow)window).VerifyTreeActions();
+                    await ((MainWindow)window).VerifyTreeState();
                     await ((MainWindow)window).VerifyProfileUi();
                     await ((MainWindow)window).VerifyDesktopUi();
                     await ((MainWindow)window).VerifyEmbeddedSessions();
@@ -98,20 +99,21 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.7"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.8"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
         MenuItem Entry(string title, Action action) { var item = new MenuItem { Header = title }; item.Click += (_, _) => action(); return item; }
         MenuItem Group(string title, params MenuItem[] items) => new() { Header = title, ItemsSource = items };
         menus.ItemsSource = new[] {
-            Group("Fichier", Entry("Nouvelle connexion", NewConnectionFromTree), Entry("Dupliquer la connexion", Duplicate), Entry("Importer mRemoteNG XML…", async () => await Import()), Entry("Enregistrer", Save), Entry("Chiffrer / déverrouiller le profil…", async () => await ManageProfile()), Entry("Quitter", Close)),
+            Group("Fichier", Entry("Nouvelle connexion", NewConnectionFromTree), Entry("Dupliquer la connexion", Duplicate), Entry("Importer mRemoteNG XML…", async () => await Import()), Entry("Enregistrer", Save), Entry("Chiffrer / déverrouiller le profil…", async () => await ManageProfile()), _lockProfileItem, Entry("Quitter", Close)),
             Group("Sessions", Entry("Connecter", () => Launch(false)), Entry("Transfert SFTP", () => Launch(true)), Entry("Ouvrir en fenêtre externe", External), Entry("Fermer la session", () => CloseSession(_tabBar.SelectedItem as SessionTab))),
             Group("Affichage", Entry("Accueil", () => _tabBar.SelectedItem = _tabs.FirstOrDefault())),
             Group("Outils", Entry("Console série", () => { New(); _protocol.SelectedIndex = 2; _host.Focus(); }), Entry("Choisir une clé SSH…", async () => await ChooseKey())),
             Group("Aide", Entry("Guide d’utilisation", ShowHelp), Entry("À propos…", async () => await ShowAbout()))
         };
         root.Children.Add(menus);
+        _lockProfileItem.Click += async (_, _) => await LockProfile();
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(5, 3) }; toolbar.Classes.Add("toolstrip");
         toolbar.Children.Add(ToolButton("Connexion", "Nouvelle connexion · Ctrl+N", "M2 2H13V18H2Z M6 7H17 M11 2V12", NewConnectionFromTree));
         toolbar.Children.Add(ToolButton("Dossier", "Nouveau dossier", "M2 5H8L10 7H20V18H2Z", async () => await CreateFolderDialog()));
@@ -127,12 +129,13 @@ public sealed partial class MainWindow : Window
         treePanel.Children.Add(DockTitle("Connexions"));
         _search.Margin = new Thickness(5); _search.MinHeight = 26; _search.FontSize = 12; Grid.SetRow(_search, 1); treePanel.Children.Add(_search);
         Grid.SetRow(_list, 2); treePanel.Children.Add(_list); sidebar.Children.Add(treePanel);
-        _list.SelectionChanged += (_, _) => { if (_list.SelectedItem is TreeViewItem item) { if (item.Tag is Connection connection) { _selectedFolder = connection.FolderPath; Edit(connection); } else if (item.Tag is string[] path) { _selectedFolder = path; _editing = null; _name.Text = _host.Text = ""; _folder.Text = string.Join(" > ", path); } } };
+        _list.SelectionChanged += (_, _) => { if (_rebuildingTree) return; if (_list.SelectedItem is TreeViewItem item) { if (item.Tag is Connection connection) { _selectedFolder = connection.FolderPath; Edit(connection); } else if (item.Tag is string[] path) { _selectedFolder = path; _editing = null; _name.Text = _host.Text = ""; _folder.Text = string.Join(" > ", path); } } };
         _list.DoubleTapped += (_, _) => { if (_list.SelectedItem is TreeViewItem { Tag: Connection }) Launch(false); };
         InstallTreeMenu();
-        _search.TextChanged += (_, _) => Filter();
+        _search.TextChanged += (_, _) => RequestFilter();
         var horizontal = new GridSplitter { Height = 4, Background = PanelLine, HorizontalAlignment = HorizontalAlignment.Stretch }; Grid.SetRow(horizontal, 1); sidebar.Children.Add(horizontal);
         var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Brushes.White };
+        _profileEditor = editor;
         editor.Classes.Add("properties"); editor.Children.Add(new Border { Background = DesktopAppearance.Chrome, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 0, 1), Child = _configurationTitle });
         var propertyToolbar = PropertyToolbar(); Grid.SetRow(propertyToolbar, 1); editor.Children.Add(propertyToolbar);
         var fields = new StackPanel { Spacing = 0 };
@@ -173,7 +176,7 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(sessions, 2); body.Children.Add(sessions); root.Children.Add(body);
         AddSession(new SessionTab("Général", EmptyWorkspace(), null, false));
         Grid.SetRow(_status, 3); _status.Margin = new Thickness(8, 4); _status.FontSize = 11; root.Children.Add(_status); Content = root;
-        Closed += (_, _) => { _closing = true; _profileKey?.Dispose(); foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } CleanupSmokeStore(); };
+        Closed += (_, _) => { _closing = true; ForgetTreeState(); _profileKey?.Dispose(); foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } CleanupSmokeStore(); };
         _protocol.SelectionChanged += (_, _) => {
             UpdateProtocol();
         };
@@ -181,7 +184,7 @@ public sealed partial class MainWindow : Window
         else { _storeLoaded = false; Opened += async (_, _) => await InitializeProfile(); }
         foreach (var input in new[] { _description, _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = Brushes.White; input.Foreground = Foreground; input.FontSize = 12; }
         _list.Background = Brushes.White; _list.Foreground = Foreground; Filter();
-        InstallShortcuts(); New();
+        InstallShortcuts(); New(); UpdateProfileActions();
     }
     private static Button Button(string title, Action action)
     {
@@ -250,7 +253,7 @@ public sealed partial class MainWindow : Window
             if (index < 0) next.Add(item); else next[index] = item;
             var folders = _folders.Concat(Enumerable.Range(1, item.FolderPath.Length).Select(length => item.FolderPath.Take(length).ToArray())).DistinctBy(FolderKey).ToArray();
             Persist(next, folders); _folders.Clear(); _folders.AddRange(folders); _connections.Clear(); foreach (var c in next) _connections.Add(c);
-            Filter(); if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); _status.Text = "Connexion enregistrée ; les secrets importés restent chiffrés.";
+            RememberTreeSelection(item); Filter(); if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); _status.Text = "Connexion enregistrée ; les secrets importés restent chiffrés.";
         } catch (Exception ex) { _status.Text = ex.Message; }
     }
     private async Task ChooseKey()

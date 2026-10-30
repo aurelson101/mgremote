@@ -25,9 +25,12 @@ public sealed partial class MainWindow
     }
     private void RebuildTree()
     {
+        CaptureTreeState();
+        _rebuildingTree = true;
+        try {
         string query = _search.Text?.Trim() ?? "";
         var items = new List<TreeViewItem>();
-        var root = new TreeViewItem { Header = TreeHeader("Connexions", "Folder"), Tag = Array.Empty<string>(), IsExpanded = true, ItemsSource = items };
+        var root = new TreeViewItem { Header = TreeHeader("Connexions", "Folder"), Tag = Array.Empty<string>(), IsExpanded = TreeFolderExpanded([], query), ItemsSource = items };
         _folderNodes.Clear(); _nodes.Clear(); _folderNodes[FolderKey([])] = root;
         TreeViewItem EnsureFolder(string[] path)
         {
@@ -35,7 +38,7 @@ public sealed partial class MainWindow
             for (int i = 0; i < path.Length; i++) {
                 string[] prefix = path.Take(i + 1).ToArray(); string key = FolderKey(prefix);
                 if (!_folderNodes.TryGetValue(key, out var folder)) {
-                    folder = new TreeViewItem { Header = TreeHeader(path[i], "Folder"), Tag = prefix, IsExpanded = true, ItemsSource = new List<TreeViewItem>() };
+                    folder = new TreeViewItem { Header = TreeHeader(path[i], "Folder"), Tag = prefix, IsExpanded = TreeFolderExpanded(prefix, query), ItemsSource = new List<TreeViewItem>() };
                     ((List<TreeViewItem>)parent.ItemsSource!).Add(folder); _folderNodes.Add(key, folder);
                 }
                 parent = folder;
@@ -50,6 +53,8 @@ public sealed partial class MainWindow
             ((List<TreeViewItem>)parent.ItemsSource!).Add(node); _nodes.Add(c, node);
         }
         _list.ItemsSource = new[] { root };
+        RestoreTreeSelection(query);
+        } finally { _rebuildingTree = false; }
     }
     private void AddSession(SessionTab tab) { tab.Body.IsVisible = false; _sessionArea.Children.Add(tab.Body); _tabs.Add(tab); _tabBar.SelectedItem = tab; }
     private void CloseSession(SessionTab? tab)
@@ -61,12 +66,14 @@ public sealed partial class MainWindow
     {
         CredentialBroker? credentials = null;
         try {
+            RequireLoadedProfile();
             var model = Read(); Connections.Validate(model);
             if (sftp && model.Protocol != "SSH") throw new ArgumentException("SFTP nécessite SSH.");
             if (sftp) { AddSession(new SessionTab("SFTP · " + model.Name, new FileTransferPane(model, () => UnlockConnection(model)))); return; }
             if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux X11/XWayland.");
             credentials = await UnlockConnection(model);
             if (_closing) throw new OperationCanceledException();
+            RequireLoadedProfile();
             var ownedCredentials = credentials;
             if (model.Protocol == "RDP" && (model.MultiMonitor || model.RdpResolution == "fullscreen")) {
                 var start = SessionLauncher.ExternalStart(model); ownedCredentials?.Configure(start, "RDP");
@@ -81,7 +88,22 @@ public sealed partial class MainWindow
         } catch (OperationCanceledException) { credentials?.Dispose(); _status.Text = "Connexion annulée."; }
         catch (Exception ex) { credentials?.Dispose(); _status.Text = "Connexion : " + ex.Message; }
     }
-    private void External() { try { SessionLauncher.Launch(Read()); _status.Text = "Session externe ouverte explicitement."; } catch (Exception ex) { _status.Text = ex.Message; } }
+    private async void External()
+    {
+        CredentialBroker? credentials = null; ExternalSession? pending = null;
+        try {
+            RequireLoadedProfile();
+            var model = Read(); Connections.Validate(model);
+            credentials = await UnlockConnection(model);
+            if (_closing) throw new OperationCanceledException();
+            RequireLoadedProfile();
+            var start = SessionLauncher.ExternalStart(model); credentials?.Configure(start, model.Protocol);
+            pending = new ExternalSession(start);
+            AddSession(new SessionTab(model.Name + " · Fenêtre externe", pending, Credentials: credentials));
+            credentials = null; pending = null; _status.Text = "Fenêtre externe liée à son onglet ; sa fermeture arrête le client.";
+        } catch (OperationCanceledException) { credentials?.Dispose(); pending?.Dispose(); _status.Text = "Connexion annulée."; }
+        catch (Exception ex) { credentials?.Dispose(); pending?.Dispose(); _status.Text = ex.Message; }
+    }
     private async Task Delete()
     {
         if (_editing == null || !_storeLoaded) return;

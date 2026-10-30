@@ -182,12 +182,11 @@ public static class Connections
     public static Store LoadStore(string? dataPath = null, ProfileKey? profileKey = null)
     {
         string file = dataPath ?? DataPath;
-        if (!File.Exists(file)) return new Store(1, [], []);
-        if (new FileInfo(file).Length > ProfileEncryption.MaxFile) throw new InvalidDataException("Fichier de connexions trop volumineux.");
-        string content = File.ReadAllText(file);
+        string content;
+        try { content = ProfileEncryption.ReadProfileText(file); } catch (FileNotFoundException) { return new Store(1, [], []); }
         using (var envelope = JsonDocument.Parse(content)) {
             if (ProfileEncryption.IsEnvelope(envelope.RootElement)) content = ProfileEncryption.Decode(envelope.RootElement, profileKey);
-            else if (new FileInfo(file).Length > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Fichier de connexions trop volumineux.");
+            else if (System.Text.Encoding.UTF8.GetByteCount(content) > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Fichier de connexions trop volumineux.");
         }
         using var json = JsonDocument.Parse(content);
         Store store = json.RootElement.ValueKind == JsonValueKind.Array
@@ -204,10 +203,11 @@ public static class Connections
     {
         var items = connections.ToArray(); foreach (var item in items) Validate(item, allowDraft: true);
         var paths = (folders ?? []).ToArray(); foreach (var path in paths) { ValidateFolderPath(path); if (path.Length == 0) throw new ArgumentException("Dossier racine explicite invalide."); }
-        string file = dataPath ?? DataPath;
+        string file = Path.GetFullPath(dataPath ?? DataPath);
         string folder = Path.GetDirectoryName(file)!;
-        if (new DirectoryInfo(folder).LinkTarget != null || new FileInfo(file).LinkTarget != null) throw new IOException("Stockage redirigé par lien refusé.");
-        if (profileKey == null && ProfileEncryption.IsEncryptedFile(file)) throw new System.Security.Cryptography.CryptographicException("Profil verrouillé : écriture refusée pour préserver le chiffrement.");
+        ProfileEncryption.RejectLinkedPath(file);
+        // Existing encrypted bytes must authenticate with this key before replacement, even during encryption setup.
+        LoadStore(file, profileKey);
         string content = JsonSerializer.Serialize(new Store(1, items, paths), new JsonSerializerOptions { WriteIndented = true });
         if (System.Text.Encoding.UTF8.GetByteCount(content) > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Profil trop volumineux.");
         if (profileKey != null) content = ProfileEncryption.Encode(content, profileKey);
@@ -221,6 +221,8 @@ public static class Connections
                 using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), leaveOpen: true)) writer.Write(content);
                 stream.Flush(flushToDisk: true);
             }
+            ProfileEncryption.RejectLinkedPath(file);
+            LoadStore(file, profileKey);
             File.Move(temporary, file, true);
         } finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
@@ -254,7 +256,12 @@ public static class SessionLauncher
             if (c.RdpShareEnabled) rdp.Add("/drive:MGRemote," + Path.GetFullPath(c.RdpSharePath));
             return rdp; // Certificate verification is retained; no password or redirected drives.
         }
-        var ssh = new List<string> { "-o", "StrictHostKeyChecking=ask", "-o", "ForwardAgent=no", "-o", "PermitLocalCommand=no" };
+        var ssh = new List<string> {
+            "-o", "StrictHostKeyChecking=ask", "-o", "ForwardAgent=no", "-o", "PermitLocalCommand=no",
+            "-o", "ForwardX11=no", "-o", "ForwardX11Trusted=no", "-o", "GSSAPIDelegateCredentials=no",
+            // Keep every client and its forwards within the owning tab's lifetime.
+            "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ControlPersist=no", "-o", "ForkAfterAuthentication=no"
+        };
         if (!sftp) ssh.Add("-tt");
         ssh.Add(sftp ? "-P" : "-p"); ssh.Add(c.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (c.Identity.Length > 0) { ssh.AddRange(["-i", c.Identity, "-o", "IdentitiesOnly=yes"]); }
@@ -281,19 +288,6 @@ public static class SessionLauncher
         }
         throw new FileNotFoundException("Composant Linux manquant : " + string.Join(" / ", names));
     }
-    public static void Launch(Connection c, bool sftp = false)
-    {
-        ValidateIdentity(c);
-        string executable = Executable(c, sftp);
-        string terminal = Find("gnome-terminal", "konsole", "xfce4-terminal", "xterm");
-        var start = new ProcessStartInfo(terminal) { UseShellExecute = false };
-        string name = Path.GetFileName(terminal);
-        if (name == "xterm") foreach (var arg in new[] { "-hold", "-xrm", "XTerm*allowWindowOps: false", "-xrm", ClipboardTranslations }) start.ArgumentList.Add(arg);
-        start.ArgumentList.Add(name == "gnome-terminal" ? "--" : name == "xfce4-terminal" ? "--execute" : "-e");
-        start.ArgumentList.Add(executable);
-        foreach (string argument in Arguments(c, sftp)) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new IOException("Impossible de lancer le terminal Linux.");
-    }
     internal static void ValidateIdentity(Connection c)
     {
         Connections.Validate(c);
@@ -301,7 +295,8 @@ public static class SessionLauncher
         if (c.Protocol == "RDP" && c.RdpShareEnabled && (!Directory.Exists(c.RdpSharePath) || new DirectoryInfo(c.RdpSharePath).LinkTarget != null))
             throw new IOException("Le dossier à partager en RDP doit exister et ne pas être un lien symbolique.");
         if (c.Identity.Length > 0 && c.Protocol == "SSH") {
-            if (!Path.IsPathFullyQualified(c.Identity) || !File.Exists(c.Identity) || new FileInfo(c.Identity).LinkTarget != null) throw new IOException("Choisissez une clé privée locale Linux existante.");
+            var identity = new FileInfo(c.Identity);
+            if (!Path.IsPathFullyQualified(c.Identity) || !identity.Exists || identity.LinkTarget != null || identity.Length is < 1 or > 1048576) throw new IOException("Choisissez une clé privée locale Linux existante (1 Mio maximum).");
             if ((File.GetUnixFileMode(c.Identity) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
                 throw new IOException("La clé privée doit être accessible uniquement à son propriétaire (chmod 600).");
             using var key = File.OpenText(c.Identity);
@@ -311,7 +306,7 @@ public static class SessionLauncher
         }
         if (c.CertificateFile.Length > 0 && c.Protocol == "SSH") {
             var certificate = new FileInfo(c.CertificateFile);
-            if (!Path.IsPathFullyQualified(c.CertificateFile) || !certificate.Exists || certificate.LinkTarget != null || certificate.Length > 65536)
+            if (!Path.IsPathFullyQualified(c.CertificateFile) || !certificate.Exists || certificate.LinkTarget != null || certificate.Length is < 1 or > 65536)
                 throw new IOException("Choisissez un certificat public OpenSSH local existant (64 Kio maximum).");
             if ((File.GetUnixFileMode(c.CertificateFile) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
                 throw new IOException("Le certificat SSH ne doit pas être modifiable par le groupe ou les autres utilisateurs.");
@@ -322,13 +317,14 @@ public static class SessionLauncher
         }
     }
     private static string Executable(Connection c, bool sftp) => c.Protocol == "Serial" ? Find("picocom") : c.Protocol == "RDP" ? Find("xfreerdp3", "xfreerdp") : Find(sftp ? "sftp" : "ssh");
-    internal static ProcessStartInfo ExternalStart(Connection c)
+    internal static ProcessStartInfo ExternalStart(Connection c, bool sftp = false)
     {
         ValidateIdentity(c);
-        if (c.Protocol != "RDP") throw new ArgumentException("Session externe gérée réservée à RDP.");
+        var arguments = Arguments(c, sftp);
+        // xterm stays in the foreground; desktop terminal launchers may detach through D-Bus.
         var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
-        start.ArgumentList.Add("-hold"); start.ArgumentList.Add("-e"); start.ArgumentList.Add(Executable(c, false));
-        foreach (var arg in Arguments(c)) start.ArgumentList.Add(arg);
+        foreach (string arg in new[] { "-hold", "-xrm", "XTerm*allowWindowOps: false", "-xrm", ClipboardTranslations, "-title", "MGRemote · " + c.Name, "-e", Executable(c, sftp) }) start.ArgumentList.Add(arg);
+        foreach (var arg in arguments) start.ArgumentList.Add(arg);
         return start;
     }
     public static ProcessStartInfo Embedded(Connection c, bool sftp, uint parent)

@@ -2,6 +2,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace MGRemote.Linux;
 
@@ -26,14 +28,69 @@ internal static class ProfileEncryption
     internal const int MaxPlaintext = 16 * 1024 * 1024;
     internal const int MaxFile = 24 * 1024 * 1024;
     private const string Format = "MGRemote-profile-v1";
+    private const int ReadFlags = 0x20000 | 0x80000 | 0x800; // O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK (Linux).
+    private const int DirectoryFlags = ReadFlags | 0x10000; // O_DIRECTORY.
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int Open(string path, int flags);
+    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
+    private static extern int OpenAt(int directory, string path, int flags);
     private sealed record Envelope(string Format, string Kdf, int Iterations, string Salt, string Nonce, string Tag, string Ciphertext);
     internal static bool IsEnvelope(JsonElement root) => root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Format", out _);
     internal static bool IsEncryptedFile(string file)
     {
-        if (!File.Exists(file)) return false;
-        if (new FileInfo(file).Length > MaxFile) throw new InvalidDataException("Profil trop volumineux.");
-        using var json = JsonDocument.Parse(File.ReadAllText(file));
+        string text;
+        try { text = ReadProfileText(file); } catch (FileNotFoundException) { return false; }
+        using var json = JsonDocument.Parse(text);
         return IsEnvelope(json.RootElement);
+    }
+    internal static void RejectLinkedPath(string file)
+    {
+        string full = Path.GetFullPath(file);
+        if (new FileInfo(full).LinkTarget != null) throw new IOException("Profil redirigé par lien refusé.");
+        for (var directory = new DirectoryInfo(Path.GetDirectoryName(full)!); directory != null; directory = directory.Parent)
+            if (directory.LinkTarget != null) throw new IOException("Dossier du profil redirigé par lien refusé.");
+    }
+    private static SafeFileHandle CheckedHandle(int descriptor, string file)
+    {
+        if (descriptor >= 0) return new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        int error = Marshal.GetLastPInvokeError();
+        if (error == 2) throw new FileNotFoundException("Profil introuvable.", file);
+        throw new IOException("Ouverture sûre du profil refusée (code " + error + ").");
+    }
+    private static FileStream OpenProfileRead(string file)
+    {
+        string full = Path.GetFullPath(file);
+        if (!OperatingSystem.IsLinux()) { RejectLinkedPath(full); return new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read); }
+        // Pin each parent directory, and refuse links at every open rather than following a checked path later.
+        SafeFileHandle directory = CheckedHandle(Open("/", DirectoryFlags), full);
+        try {
+            foreach (string component in Path.GetDirectoryName(full)!.Split('/', StringSplitOptions.RemoveEmptyEntries)) {
+                var next = CheckedHandle(OpenAt(directory.DangerousGetHandle().ToInt32(), component, DirectoryFlags), full);
+                directory.Dispose(); directory = next;
+            }
+            var handle = CheckedHandle(OpenAt(directory.DangerousGetHandle().ToInt32(), Path.GetFileName(full), ReadFlags), full);
+            try { return new FileStream(handle, FileAccess.Read); } catch { handle.Dispose(); throw; }
+        } finally { directory.Dispose(); }
+    }
+    internal static string ReadProfileText(string file)
+    {
+        using var stream = OpenProfileRead(file);
+        return ReadBoundedText(stream, MaxFile);
+    }
+    internal static string ReadBoundedText(Stream stream, int maximumBytes)
+    {
+        if (!stream.CanSeek) throw new IOException("Le profil doit être un fichier ordinaire.");
+        if (stream.Length > maximumBytes) throw new InvalidDataException("Profil trop volumineux.");
+        using var bytes = new MemoryStream();
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, maximumBytes - bytes.Length + 1))) > 0) {
+            if (bytes.Length + count > maximumBytes) throw new InvalidDataException("Profil trop volumineux.");
+            bytes.Write(buffer, 0, count);
+        }
+        ReadOnlySpan<byte> text = bytes.GetBuffer().AsSpan(0, (int)bytes.Length);
+        if (text.StartsWith(new byte[] { 0xef, 0xbb, 0xbf })) text = text[3..];
+        return new UTF8Encoding(false, true).GetString(text);
     }
     internal static ProfileKey CreateKey(string password) => new(password, RandomNumberGenerator.GetBytes(16));
     private static Envelope ReadEnvelope(JsonElement root)

@@ -11,39 +11,75 @@ namespace MGRemote.Linux;
 public sealed partial class MainWindow
 {
     private ProfileKey? _profileKey;
+    private bool _profileBusy;
+    private Control? _profileEditor;
+    private readonly MenuItem _lockProfileItem = new() { Header = "Verrouiller le profil…", IsEnabled = false };
+    private void UpdateProfileActions()
+    {
+        _lockProfileItem.IsEnabled = _storeLoaded && _profileKey != null && !_profileBusy;
+        if (_profileEditor != null) _profileEditor.IsEnabled = _storeLoaded;
+        _sftp.IsEnabled = _storeLoaded && _protocol.SelectedIndex == 0;
+    }
+    private void RequireLoadedProfile()
+    {
+        if (!_storeLoaded) throw new IOException("Déverrouillez ou chargez le profil avant d’ouvrir une connexion.");
+    }
     private async Task InitializeProfile()
     {
-        if (App.Smoke || _closing) return;
-        _storeLoaded = false;
+        if (App.Smoke || _closing || _profileBusy) return;
+        _profileBusy = true; _storeLoaded = false; UpdateProfileActions();
         ProfileKey? candidate = null;
         try {
-            bool encrypted = ProfileEncryption.IsEncryptedFile(_dataPath);
+            bool encrypted = await Task.Run(() => ProfileEncryption.IsEncryptedFile(_dataPath));
+            if (_closing) return;
             if (encrypted) {
                 candidate = await AskProfileUnlock();
                 if (candidate == null) { _status.Text = "Profil verrouillé — ouvrez Fichier → Chiffrer / déverrouiller le profil pour réessayer. Aucune écriture autorisée."; return; }
             }
-            var store = Connections.LoadStore(_dataPath, candidate);
+            var store = await Task.Run(() => Connections.LoadStore(_dataPath, candidate));
             if (_closing) return;
             _profileKey?.Dispose(); _profileKey = candidate; candidate = null;
             _connections.Clear(); foreach (var item in store.Items) _connections.Add(item);
             _folders.Clear(); _folders.AddRange(store.Folders); _storeLoaded = true;
-            Filter(); New();
+            Filter(); New(); UpdateProfileActions();
             _status.Text = encrypted ? "Profil chiffré déverrouillé pour cette session." : "Profil chargé — chiffrement facultatif disponible dans Fichier.";
             if (!encrypted) await OfferProfileEncryption();
         } catch (Exception ex) { _status.Text = "Chargement du profil : " + ex.Message + " — Écriture bloquée pour préserver vos données."; }
-        finally { candidate?.Dispose(); }
+        finally { candidate?.Dispose(); _profileBusy = false; UpdateProfileActions(); }
     }
     private async Task ManageProfile()
     {
+        if (_profileBusy || _closing) return;
         if (!_storeLoaded) { await InitializeProfile(); return; }
         if (_profileKey != null) { _status.Text = "Le profil complet est déjà chiffré. Sa phrase secrète sera demandée au prochain démarrage."; return; }
-        await OfferProfileEncryption();
+        _profileBusy = true;
+        try { await OfferProfileEncryption(); }
+        finally { _profileBusy = false; UpdateProfileActions(); }
+    }
+    private async Task LockProfile(Action<Window>? opened = null)
+    {
+        if (_profileBusy || _profileKey == null || !_storeLoaded || _closing) return;
+        var dialog = new Window { Title = "Verrouiller le profil", Width = 490, Height = 220, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var panel = new StackPanel { Margin = new Thickness(18), Spacing = 16 };
+        panel.Children.Add(new TextBlock { Text = "Les sessions et transferts ouverts seront arrêtés, et les modifications non enregistrées seront ignorées. Votre phrase secrète sera nécessaire pour retrouver les connexions.", TextWrapping = TextWrapping.Wrap });
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actions.Children.Add(Button("Annuler", () => dialog.Close(false))); actions.Children.Add(Button("Verrouiller", () => dialog.Close(true)));
+        panel.Children.Add(actions); dialog.Content = panel; dialog.Opened += (_, _) => opened?.Invoke(dialog);
+        if (!await dialog.ShowDialog<bool>(this) || _closing) return;
+        foreach (var tab in _tabs.Where(t => t.Closable).ToArray()) CloseSession(tab);
+        _profileKey.Dispose(); _profileKey = null; _storeLoaded = false;
+        _connections.Clear(); _folders.Clear(); _selectedFolder = []; _search.Text = ""; ForgetTreeState();
+        Filter(); New(); UpdateProfileActions();
+        _configurationTitle.Text = "Configuration · Profil verrouillé";
+        _status.Text = "Profil verrouillé — Fichier → Chiffrer / déverrouiller le profil pour le rouvrir.";
     }
     private async Task<ProfileKey?> AskProfileUnlock(Action<Window>? opened = null)
     {
-        if (new FileInfo(_dataPath).Length > ProfileEncryption.MaxFile) throw new IOException("Profil trop volumineux.");
-        using var document = JsonDocument.Parse(File.ReadAllText(_dataPath));
-        JsonElement envelope = document.RootElement.Clone();
+        JsonElement envelope = await Task.Run(() => {
+            using var document = JsonDocument.Parse(ProfileEncryption.ReadProfileText(_dataPath));
+            return document.RootElement.Clone();
+        });
+        if (_closing) return null;
         var dialog = new Window { Title = "Déverrouiller le profil MGRemote", Width = 510, Height = 320, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var panel = new StackPanel { Spacing = 12, Margin = new Thickness(18) };
         panel.Children.Add(new TextBlock { Text = "Ce profil est chiffré. Saisissez sa phrase secrète pour charger les connexions, les dossiers et les réglages. Annuler laisse le profil verrouillé et interdit toute écriture.", TextWrapping = TextWrapping.Wrap });
@@ -93,6 +129,7 @@ public sealed partial class MainWindow
                 if (closed || _closing) return;
                 Connections.Save(_connections, _folders, _dataPath, candidate);
                 _profileKey = candidate; candidate = null;
+                UpdateProfileActions();
                 _status.Text = "Profil complet chiffré — déverrouillage requis au prochain démarrage.";
                 dialog.Close();
             } catch (Exception ex) { if (!closed) error.Text = "Chiffrement impossible : " + ex.Message; }
@@ -140,11 +177,24 @@ public sealed partial class MainWindow
                 Click(dialog, "Déverrouiller");
             });
             if (unlocked == null || Connections.LoadStore(_dataPath, unlocked).Items.Single().Host != fixture.Host) throw new Exception("Profile unlock dialog lost the profile.");
+            _profileKey = unlocked; _storeLoaded = true; UpdateProfileActions();
+            await LockProfile(dialog => Click(dialog, "Annuler"));
+            if (!_storeLoaded || _profileKey == null) throw new Exception("Canceling profile lock changed the active profile.");
+            var start = new System.Diagnostics.ProcessStartInfo(SessionLauncher.Find("sleep")) { UseShellExecute = false }; start.ArgumentList.Add("60");
+            var owned = new ExternalSession(start); AddSession(new SessionTab("Lock fixture", owned));
+            await LockProfile(dialog => Click(dialog, "Verrouiller")); await owned.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+            bool alive; try { using var process = System.Diagnostics.Process.GetProcessById(owned.ProcessId); alive = !process.HasExited; } catch (ArgumentException) { alive = false; }
+            if (alive || _profileKey != null || _storeLoaded || _connections.Count != 0 || _folders.Count != 0 || _tabs.Any(t => t.Closable) || Read().Host.Length > 0 || _profileEditor?.IsEnabled != false) throw new Exception("Profile lock retained client, key or editable connection data.");
+            blocked = false; try { Persist([]); } catch (IOException) { blocked = true; }
+            if (!blocked || File.ReadAllText(_dataPath) != encrypted) throw new Exception("Manual profile lock modified the saved profile or permitted writes.");
+            int tabs = _tabs.Count; Launch(false); External();
+            if (_tabs.Count != tabs || _status.Text?.Contains("Déverrouillez") != true) throw new Exception("Locked profile can open a client.");
+            Console.WriteLine("PASS: manual profile lock cancellation, owned-process shutdown, in-memory key/editor cleanup and locked launch/write guards.");
             Console.WriteLine("PASS: optional startup profile dialog skip/encrypt, close during key derivation preserves plaintext, canceled unlock write block and successful profile unlock; temporary profile only.");
         } finally {
             _profileKey?.Dispose(); _profileKey = null; _storeLoaded = previousLoaded;
             _connections.Clear(); foreach (var item in previousItems) _connections.Add(item);
-            _folders.Clear(); _folders.AddRange(previousFolders); Filter(); New(); CleanupSmokeStore();
+            _folders.Clear(); _folders.AddRange(previousFolders); Filter(); New(); UpdateProfileActions(); CleanupSmokeStore();
         }
     }
 }

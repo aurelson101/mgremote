@@ -6,6 +6,10 @@ namespace MGRemote.Linux;
 
 internal static class ProfileEncryptionTests
 {
+    private sealed class GrowingStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override long Length => 0; // Simulate a file which grows after the initial size observation.
+    }
     internal static void Run()
     {
         string directory = Path.Combine(Path.GetTempPath(), "mgremote-profile-test-" + Guid.NewGuid().ToString("N"));
@@ -23,6 +27,10 @@ internal static class ProfileEncryptionTests
             Refused<CryptographicException>(() => Connections.LoadStore(file), "locked profile was readable");
             Refused<CryptographicException>(() => Connections.Save([], dataPath: file), "locked profile overwrite was accepted");
             Check(File.ReadAllText(file) == encrypted, "rejected write changed the file");
+            using (var otherKey = ProfileEncryption.CreateKey("different synthetic profile phrase")) {
+                Refused<CryptographicException>(() => Connections.Save([], dataPath: file, profileKey: otherKey), "a different profile key overwrote the encrypted store");
+                Check(File.ReadAllText(file) == encrypted, "wrong-key overwrite changed the encrypted store");
+            }
             using var envelope = JsonDocument.Parse(encrypted);
             Refused<CryptographicException>(() => { using var wrong = ProfileEncryption.Unlock(envelope.RootElement, "incorrect synthetic phrase"); }, "wrong password accepted");
             using var unlocked = ProfileEncryption.Unlock(envelope.RootElement, "synthetic profile phrase 123");
@@ -34,6 +42,11 @@ internal static class ProfileEncryptionTests
             byte[] tag = Convert.FromBase64String(modified["Tag"]!.GetValue<string>()); tag[0] ^= 1;
             modified["Tag"] = Convert.ToBase64String(tag);
             using (var tampered = JsonDocument.Parse(modified.ToJsonString())) Refused<CryptographicException>(() => ProfileEncryption.Decode(tampered.RootElement, key), "tampering accepted");
+            string authenticatedStore = File.ReadAllText(file);
+            File.WriteAllText(file, modified.ToJsonString());
+            Refused<CryptographicException>(() => Connections.Save([item], dataPath: file, profileKey: key), "saving replaced unauthenticated existing bytes");
+            Check(File.ReadAllText(file) == modified.ToJsonString(), "rejected save changed the tampered store");
+            File.WriteAllText(file, authenticatedStore);
             modified["Iterations"] = int.MaxValue;
             using (var excessive = JsonDocument.Parse(modified.ToJsonString())) Refused<InvalidDataException>(() => ProfileEncryption.Decode(excessive.RootElement, key), "unbounded KDF settings accepted");
             Refused<ArgumentException>(() => ProfileEncryption.CreateKey("too short"), "short profile phrase accepted");
@@ -43,7 +56,20 @@ internal static class ProfileEncryptionTests
             if (OperatingSystem.IsLinux()) Check((File.GetUnixFileMode(file) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite)) == 0, "profile permissions allow other users");
             File.WriteAllText(file, JsonSerializer.Serialize(new[] { item }));
             Check(Connections.LoadStore(file).Items.Single().Name == item.Name, "legacy array compatibility");
-            Console.WriteLine("PASS: optional profile encryption, metadata/folder/secret round trip, locked write guard, wrong password, tampering, nonce renewal, bounded KDF, key disposal, permissions and legacy JSON compatibility.");
+            using (var growing = new GrowingStream(new byte[33])) Refused<InvalidDataException>(() => ProfileEncryption.ReadBoundedText(growing, 32), "file growth bypassed the read budget");
+            using (var exact = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("12345678"))) Check(ProfileEncryption.ReadBoundedText(exact, 8) == "12345678", "exact read budget was rejected");
+            if (OperatingSystem.IsLinux()) {
+                string link = Path.Combine(directory, "linked.json"), broken = Path.Combine(directory, "broken.json"), linkedFolder = Path.Combine(directory, "linked-folder");
+                File.CreateSymbolicLink(link, file); File.CreateSymbolicLink(broken, Path.Combine(directory, "absent.json"));
+                Directory.CreateSymbolicLink(linkedFolder, directory);
+                Refused<IOException>(() => Connections.LoadStore(link), "profile read followed a file symlink");
+                Refused<IOException>(() => ProfileEncryption.IsEncryptedFile(link), "encryption detection followed a file symlink");
+                Refused<IOException>(() => Connections.LoadStore(broken), "dangling file symlink was treated as a new profile");
+                Refused<IOException>(() => Connections.LoadStore(Path.Combine(linkedFolder, "connections.json")), "profile read followed an ancestor symlink");
+                Refused<IOException>(() => Connections.Save([item], dataPath: Path.Combine(linkedFolder, "new.json")), "profile write followed an ancestor symlink");
+                Check(Connections.LoadStore(file).Items.Single().Host == item.Host, "symlink checks modified the real profile");
+            }
+            Console.WriteLine("PASS: authenticated profile encryption, locked/wrong-key/tampered overwrite guards, bounded growing-file reads, symlink rejection, nonce renewal, bounded KDF, key disposal, permissions and legacy JSON compatibility.");
         } finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
     }
 }
