@@ -7,7 +7,7 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 | Platform | Current package | Status |
 | --- | --- | --- |
 | Windows x64 | [MSI 0.1.15](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.15) | Unsigned preview |
-| Linux x86-64 | [AppImage 0.2.9](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.2.9) | Unsigned development preview; embedded X11 sessions, incomplete Windows parity |
+| Linux x86-64 | [AppImage 0.2.10](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.2.10) | Unsigned development preview; embedded X11 sessions, incomplete Windows parity |
 
 Download the installer or AppImage from the matching release. SHA-256 manifests and corresponding source archives accompany the packages. The editions have independent version numbers and are not feature-equivalent.
 
@@ -45,15 +45,17 @@ Right-click the connection tree to create folders or connections, edit/rename, d
 The Linux edition uses Avalonia, a bundled .NET runtime and a Windows-style tree/configuration/session layout with resizable panes. X11/XWayland sessions are embedded in closeable tabs using xterm, OpenSSH, FreeRDP and picocom. It includes graphical SFTP file/folder transfers, optional SSH keys and bastion aliases, explicit RDP folder sharing, color/audio/console settings and interactive RDP gateways. Multimonitor RDP uses the external-window action. Windows feature parity remains incomplete.
 
 ```sh
-chmod +x MGRemote-Linux-0.2.9-x86_64.AppImage
-./MGRemote-Linux-0.2.9-x86_64.AppImage
+chmod +x MGRemote-Linux-0.2.10-x86_64.AppImage
+./MGRemote-Linux-0.2.10-x86_64.AppImage
 ```
 
-Install OpenSSH 9+, FreeRDP, xterm, picocom for serial, and Avalonia native dependencies through your distribution. An X11/XWayland desktop is required. The clients and desktop libraries are not bundled. If FUSE is unavailable, use `./MGRemote-Linux-0.2.9-x86_64.AppImage --appimage-extract-and-run`.
+Install OpenSSH 9+, FreeRDP, xterm, picocom for serial, and Avalonia native dependencies through your distribution. An X11/XWayland desktop is required. The clients and desktop libraries are not bundled. If FUSE is unavailable, use `./MGRemote-Linux-0.2.10-x86_64.AppImage --appimage-extract-and-run`.
 
 Authenticated XML import supports AES/Twofish/Serpent with GCM/EAX, including full-file encryption and inherited connection passwords. Optional password migration reencrypts secrets with a distinct local passphrase; master passphrases are not persisted. Unlock per connection to use an imported password for SSH/SFTP or direct embedded RDP, or choose manual authentication. Automatic SSH requires an already verified known host and an exact destination password prompt. Bastions, private-key passphrases, MFA, gateways and external/multimonitor credentials retain the manual path. Real remote authentication still requires validation.
 
-Legacy Rijndael/CCM, Windows vault migration, unsupported protocols and unmapped Windows options are not fully compatible. Arbitrary SSH options and Windows key paths are not executed/imported. Review the settings before connecting. See the [versioned Linux instructions](https://github.com/aurelson101/mgremote/blob/linux-v0.2.9/Linux/README.md) for requirements, secret limits and authentication restrictions. Serial profiles use Linux device paths and picocom (Ctrl+A then Ctrl+X to exit); device permissions are not changed.
+Legacy Rijndael/CCM, Windows vault migration, unsupported protocols and unmapped Windows options are not fully compatible. Arbitrary SSH options and Windows key paths are not executed/imported. Review the settings before connecting. See the [versioned Linux instructions](https://github.com/aurelson101/mgremote/blob/linux-v0.2.10/Linux/README.md) for requirements, secret limits and authentication restrictions. Serial profiles use Linux device paths and picocom (Ctrl+A then Ctrl+X to exit); device permissions are not changed.
+
+To move a Linux profile, use **File → Export encrypted profile** and choose a `.mgremote` file plus an export passphrase. On the other Linux PC, choose **File → Import encrypted profile**. Import merges saved connections without removing local ones and offers local encryption. SSH private-key files and OpenSSH config are not included; existing nested secrets retain their original local phrase.
 
 ## Security and validation status
 

@@ -192,6 +192,11 @@ public static class Connections
             if (ProfileEncryption.IsEnvelope(envelope.RootElement)) content = ProfileEncryption.Decode(envelope.RootElement, profileKey);
             else if (System.Text.Encoding.UTF8.GetByteCount(content) > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Fichier de connexions trop volumineux.");
         }
+        return ParseStore(content) with { Revision = revision };
+    }
+    internal static Store ParseStore(string content)
+    {
+        if (System.Text.Encoding.UTF8.GetByteCount(content) > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Fichier de connexions trop volumineux.");
         using var json = JsonDocument.Parse(content);
         Store store = json.RootElement.ValueKind == JsonValueKind.Array
             ? new Store(1, json.RootElement.Deserialize<Connection[]>()!, [])
@@ -199,7 +204,7 @@ public static class Connections
         if (store.Version != 1 || store.Items == null || store.Folders == null) throw new InvalidDataException("Version de stockage non prise en charge ou données incomplètes.");
         foreach (var item in store.Items) Validate(item, allowDraft: true);
         foreach (var path in store.Folders) { ValidateFolderPath(path); if (path.Length == 0) throw new InvalidDataException("Dossier racine explicite invalide."); }
-        return store with { Revision = revision, Folders = store.Folders.Concat(store.Items.Select(c => c.FolderPath))
+        return store with { Folders = store.Folders.Concat(store.Items.Select(c => c.FolderPath))
             .SelectMany(path => Enumerable.Range(1, path.Length).Select(length => path.Take(length).ToArray()))
             .DistinctBy(path => JsonSerializer.Serialize(path)).ToArray() };
     }

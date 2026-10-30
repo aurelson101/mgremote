@@ -18,8 +18,9 @@ public sealed partial class MainWindow
     private void UpdateProfileActions()
     {
         _lockProfileItem.IsEnabled = _storeLoaded && _profileKey != null && !_profileBusy;
-        if (_profileEditor != null) _profileEditor.IsEnabled = _storeLoaded;
-        _sftp.IsEnabled = _storeLoaded && _protocol.SelectedIndex == 0;
+        _exportProfileItem.IsEnabled = _importProfileItem.IsEnabled = _storeLoaded && !_profileBusy;
+        if (_profileEditor != null) _profileEditor.IsEnabled = _storeLoaded && !_profileBusy;
+        _sftp.IsEnabled = _storeLoaded && !_profileBusy && _protocol.SelectedIndex == 0;
     }
     private void RequireLoadedProfile()
     {

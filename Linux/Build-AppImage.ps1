@@ -1,6 +1,6 @@
 # Build an isolated AppImage; does not install software or alter the Windows fork.
 [CmdletBinding()]
-param([string]$SquashfsTool, [string]$Version = '0.2.9')
+param([string]$SquashfsTool, [string]$Version = '0.2.10')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid version.' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -59,7 +59,7 @@ $source = Join-Path $release "MGRemote-Linux-$Version-source.zip"
 $sourceTree = Join-Path $release 'source-tree'
 $linuxSource = Join-Path $sourceTree 'Linux'
 New-Item -ItemType Directory -Force $linuxSource | Out-Null
-foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','CredentialBroker.cs','mgremote-askpass','XmlSecrets.cs','MainWindow.Secrets.cs','Program.cs','MainWindow.Sessions.cs','MainWindow.Tree.cs','MainWindow.TreeState.cs','MainWindow.Desktop.cs','MainWindow.Configuration.cs','MainWindow.Appearance.cs','DesktopAppearance.cs','MainWindow.Profile.cs','ProfileEncryption.cs','ProfileEncryptionTests.cs','ConnectionIcons.cs','ConnectionSettingsTests.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Build-AppImage.ps1','README.md','Licenses')) {
+foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','CredentialBroker.cs','mgremote-askpass','XmlSecrets.cs','MainWindow.Secrets.cs','Program.cs','MainWindow.Sessions.cs','MainWindow.Tree.cs','MainWindow.TreeState.cs','MainWindow.Desktop.cs','MainWindow.Configuration.cs','MainWindow.Appearance.cs','DesktopAppearance.cs','MainWindow.Profile.cs','ProfileEncryption.cs','ProfileTransfer.cs','ProfileTransferTests.cs','MainWindow.ProfileTransfer.cs','MainWindow.ProfileTransfer.Tests.cs','ProfileEncryptionTests.cs','ConnectionIcons.cs','ConnectionSettingsTests.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Build-AppImage.ps1','README.md','Licenses')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $linuxSource -Recurse
 }
 Copy-Item -LiteralPath (Join-Path $root 'COPYING.txt') -Destination $sourceTree

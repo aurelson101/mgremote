@@ -47,6 +47,7 @@ public sealed class App : Application
                     ((MainWindow)window).VerifyTreeActions();
                     await ((MainWindow)window).VerifyTreeState();
                     await ((MainWindow)window).VerifyProfileUi();
+                    await ((MainWindow)window).VerifyPortableProfileUi();
                     ((MainWindow)window).VerifyTabClosing();
                     await ((MainWindow)window).VerifyDesktopUi();
                     await ((MainWindow)window).VerifyEmbeddedSessions();
@@ -100,14 +101,14 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.9"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.10"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
         MenuItem Entry(string title, Action action) { var item = new MenuItem { Header = title }; item.Click += (_, _) => action(); return item; }
         MenuItem Group(string title, params MenuItem[] items) => new() { Header = title, ItemsSource = items };
         menus.ItemsSource = new[] {
-            Group("Fichier", Entry("Nouvelle connexion", NewConnectionFromTree), Entry("Dupliquer la connexion", Duplicate), Entry("Importer mRemoteNG XML…", async () => await Import()), Entry("Enregistrer", Save), Entry("Chiffrer / déverrouiller le profil…", async () => await ManageProfile()), _lockProfileItem, Entry("Quitter", Close)),
+            Group("Fichier", Entry("Nouvelle connexion", NewConnectionFromTree), Entry("Dupliquer la connexion", Duplicate), Entry("Importer mRemoteNG XML…", async () => await Import()), _importProfileItem, _exportProfileItem, Entry("Enregistrer", Save), Entry("Chiffrer / déverrouiller le profil…", async () => await ManageProfile()), _lockProfileItem, Entry("Quitter", Close)),
             Group("Sessions", Entry("Connecter", () => Launch(false)), Entry("Transfert SFTP", () => Launch(true)), Entry("Ouvrir en fenêtre externe", External), Entry("Fermer la session", () => CloseSession(_tabBar.SelectedItem as SessionTab))),
             Group("Affichage", Entry("Accueil", () => _tabBar.SelectedItem = _tabs.FirstOrDefault())),
             Group("Outils", Entry("Console série", () => { New(); _protocol.SelectedIndex = 2; _host.Focus(); }), Entry("Choisir une clé SSH…", async () => await ChooseKey())),
@@ -115,6 +116,7 @@ public sealed partial class MainWindow : Window
         };
         root.Children.Add(menus);
         _lockProfileItem.Click += async (_, _) => await LockProfile();
+        _exportProfileItem.Click += async (_, _) => await ExportPortableProfile(); _importProfileItem.Click += async (_, _) => await ImportPortableProfile();
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(5, 3) }; toolbar.Classes.Add("toolstrip");
         toolbar.Children.Add(ToolButton("Connexion", "Nouvelle connexion · Ctrl+N", "M2 2H13V18H2Z M6 7H17 M11 2V12", NewConnectionFromTree));
         toolbar.Children.Add(ToolButton("Dossier", "Nouveau dossier", "M2 5H8L10 7H20V18H2Z", async () => await CreateFolderDialog()));

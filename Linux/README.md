@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.9 — development preview
+# MGRemote Linux Desktop 0.2.10 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -82,3 +82,11 @@ Explicit external windows now have an owning tab, including SSH and serial. Dest
 The editor keeps the revision read from disk and rejects a save if another instance/program has changed or deleted the profile. Restart MGRemote to load the new version; unsaved edits are not written over it. Saving authenticates the existing profile once and compares its revision immediately before replacement instead of decrypting it twice. This detects stale editors and changes observed during save; it is not a cross-process database transaction. The on-disk format is unchanged.
 
 Closing a background tab preserves the active session; closing the active tab selects its neighbor. Manual profile locking waits for application-owned clients and SFTP shutdown before reporting completion, and reports unconfirmed shutdown separately.
+
+## Development update 0.2.10: portable encrypted profiles
+
+To move saved connections to another Linux computer, select **Fichier → Exporter le profil chiffré…**, choose a `.mgremote` file and confirm an export passphrase of at least 12 characters. The export is always AES-256-GCM encrypted, even if the current profile is not. It does not change the active profile or the destination folder’s permissions. Confirming replacement can update an existing encrypted export; unrelated files and the active profile cannot be overwritten.
+
+Copy this file to the other computer and use **Fichier → Importer un profil chiffré…** with its passphrase. Existing saved connections remain; exact duplicates are skipped. If the local profile is unencrypted, **Chiffrer le profil local avec cette phrase** is selected by default and can be unchecked. An already encrypted local profile keeps its existing key/passphrase. Wrong phrases, altered archives and cancellation preserve the local profile. Windows 0.1.15 does not implement this Linux profile format.
+
+Only saved connections, folders and configuration are included. Private SSH key files, certificates, OpenSSH config aliases, shared folders and serial devices are not packaged; their paths/settings are preserved and must be checked on the destination PC. Previously imported connection passwords remain encrypted with their original local secret phrase, which may also be needed when connecting. Share the export passphrase separately from the file and keep it securely: there is no recovery.
