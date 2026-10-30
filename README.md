@@ -7,7 +7,7 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 | Platform | Current package | Status |
 | --- | --- | --- |
 | Windows x64 | [MSI 0.1.15](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.15) | Unsigned preview |
-| Linux x86-64 | [AppImage 0.2.2](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.2.2) | Unsigned development preview; embedded X11 sessions, incomplete Windows parity |
+| Linux x86-64 | [AppImage 0.2.3](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.2.3) | Unsigned development preview; embedded X11 sessions, incomplete Windows parity |
 
 Download the installer or AppImage from the matching release. SHA-256 manifests and corresponding source archives accompany the packages. The editions have independent version numbers and are not feature-equivalent.
 
@@ -34,20 +34,20 @@ msiexec /x "MGRemote-0.1.15-win-x64-preview.msi" /qn /norestart
 
 Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly requests cleanup of app-owned data for the current interactive user. It does not erase operating-system or antivirus records, other users' profiles, documents or personal SSH keys. See [Windows implementation notes](MGREMOTE-WINDOWS.md).
 
-## Linux prototype
+## Linux desktop development preview
 
-The Linux edition uses Avalonia and a bundled .NET runtime. It provides connection creation/editing, local metadata storage, XML metadata import, optional SSH keys, interactive SFTP, RDP clipboard selection and multiple-monitor requests. SSH/SFTP use the installed Linux terminal; RDP uses the installed FreeRDP client. Sessions open in separate windows, not integrated tabs. Serial profiles can also be saved: select Serial, enter a Linux device such as `/dev/ttyUSB0` or `/dev/serial/by-id/...`, and set baud rate, bits, parity and flow control. Install `picocom`; the app does not change device permissions or run sudo. Exit picocom with Ctrl+A then Ctrl+X.
+The Linux edition uses Avalonia, a bundled .NET runtime and a Windows-style tree/configuration/session layout with resizable panes. X11/XWayland sessions are embedded in closeable tabs using xterm, OpenSSH, FreeRDP and picocom. It includes graphical SFTP file/folder transfers, optional SSH keys and bastion aliases, explicit RDP folder sharing, color/audio/console settings and interactive RDP gateways. Multimonitor RDP uses the external-window action. Windows feature parity remains incomplete.
 
 ```sh
-chmod +x MGRemote-Linux-0.1.2-x86_64.AppImage
-./MGRemote-Linux-0.1.2-x86_64.AppImage
+chmod +x MGRemote-Linux-0.2.3-x86_64.AppImage
+./MGRemote-Linux-0.2.3-x86_64.AppImage
 ```
 
-Install OpenSSH Client, FreeRDP, a supported terminal (GNOME Terminal, Konsole, XFCE Terminal or xterm), and the [Avalonia Linux native dependencies](https://docs.avaloniaui.net/docs/deployment/linux) using your distribution's package manager. An X11/XWayland desktop is required by this prototype. .NET is bundled; the remote clients and desktop libraries are not. If FUSE is unavailable, try `./MGRemote-Linux-0.1.2-x86_64.AppImage --appimage-extract-and-run`.
+Install OpenSSH 9+, FreeRDP, xterm, picocom for serial, and Avalonia native dependencies through your distribution. An X11/XWayland desktop is required. The clients and desktop libraries are not bundled. If FUSE is unavailable, use `./MGRemote-Linux-0.2.3-x86_64.AppImage --appimage-extract-and-run`.
 
-XML import does not migrate passwords, Windows key paths, Windows vault data or arbitrary SSH options. Protocol, port, username and domain inheritance is resolved from parent folders. Select an existing Linux OpenSSH/PEM key with private permissions, then review the connection before use. Existing OpenSSH aliases may define ProxyJump. See [Linux instructions](Linux/README.md).
+Authenticated XML import supports AES/Twofish/Serpent with GCM/EAX, including full-file encryption and inherited connection passwords. Optional password migration reencrypts secrets with a distinct local passphrase; master passphrases are not persisted. Unlock per connection to use an imported password for SSH/SFTP or direct embedded RDP, or choose manual authentication. Automatic SSH requires an already verified known host and an exact destination password prompt. Bastions, private-key passphrases, MFA, gateways and external/multimonitor credentials retain the manual path. Real remote authentication still requires validation.
 
-Import now reports unsupported protocols instead of silently hiding the skipped count. Fully encrypted XML is rejected with guidance. If stored Linux connection data cannot be loaded, saving/importing is blocked to prevent overwriting the existing file. The Linux editor includes a search field and keeps action buttons visible while the form scrolls.
+Legacy Rijndael/CCM, Windows vault migration, unsupported protocols and unmapped Windows options are not fully compatible. Arbitrary SSH options and Windows key paths are not executed/imported. Review the settings before connecting. See the [versioned Linux instructions](https://github.com/aurelson101/mgremote/blob/linux-v0.2.3/Linux/README.md) for requirements, secret limits and authentication restrictions. Serial profiles use Linux device paths and picocom (Ctrl+A then Ctrl+X to exit); device permissions are not changed.
 
 ## Security and validation status
 
