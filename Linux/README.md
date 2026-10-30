@@ -20,3 +20,5 @@ Native session maintenance is driven by X11 structural events and parent size ch
 ## Development update 0.2.2
 
 Connections can use an optional SSH bastion alias defined in ~/.ssh/config (including its own key/user/port), shared by SSH and SFTP. RDP can explicitly share one selected local folder, read/write; disabled by default. The server can access it as \\tsclient\MGRemote. Connection duplication creates an editable copy without changing the source. Editing preserves imported folder names containing the display separator. Managed RDP/VNC bastion tunnels remain incomplete.
+
+The next Linux development changes group connection properties into collapsible sections and import description, inherited host, clipboard, console session, color depth and audio redirection from mRemoteNG XML. Invalid explicit ports and boolean values abort import instead of silently substituting defaults. Encrypted files/secrets, unsupported protocols and other unmapped Windows options are still not fully compatible.

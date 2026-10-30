@@ -50,6 +50,10 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<Connection> _connections = [];
     private readonly TreeView _list = new() { MinWidth = 220 };
     private readonly TextBox _folder = new();
+    private readonly TextBox _description = new() { AcceptsReturn = true, MinHeight = 56, MaxHeight = 120, TextWrapping = TextWrapping.Wrap };
+    private readonly ComboBox _colors = new() { ItemsSource = new[] { 8, 15, 16, 24, 32 }, SelectedIndex = 4 };
+    private readonly ComboBox _audio = new() { ItemsSource = new[] { "Sur cet ordinateur", "Sur le serveur", "Désactivé" }, SelectedIndex = 2 };
+    private readonly CheckBox _console = new() { Content = "Session d’administration RDP (/admin)" };
     private readonly ObservableCollection<SessionTab> _tabs = [];
     private readonly Avalonia.Controls.Primitives.TabStrip _tabBar = new();
     private readonly Grid _sessionArea = new();
@@ -106,15 +110,21 @@ public sealed partial class MainWindow : Window
         var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Background = Brushes.White };
         editor.Children.Add(new TextBlock { Text = "Configuration", FontWeight = FontWeight.SemiBold, Margin = new Thickness(8) });
         var fields = new StackPanel { Spacing = 5, Margin = new Thickness(6) };
-        Add(fields, "Nom", _name); Add(fields, "Dossier", _folder); _folder.PlaceholderText = "Groupe > Sous-groupe";
-        Add(fields, "Protocole", _protocol); Add(fields, "Hôte / IP / port série", _host); Add(fields, "Port réseau", _port);
-        Add(fields, "Utilisateur", _user); Add(fields, "Domaine RDP", _domain); Add(fields, "Clé privée SSH", _key);
-        Add(fields, "Bastion SSH", _jump);
-        fields.Children.Add(Button("Choisir une clé…", async () => await ChooseKey()));
+        var displayFields = new StackPanel { Spacing = 5 };
+        fields.Children.Add(new Expander { Header = "Affichage", IsExpanded = true, Content = displayFields, HorizontalAlignment = HorizontalAlignment.Stretch });
+        Add(displayFields, "Description", _description);
+        Add(displayFields, "Nom", _name); Add(displayFields, "Dossier", _folder); _folder.PlaceholderText = "Groupe > Sous-groupe";
+        var connectionFields = new StackPanel { Spacing = 5 };
+        fields.Children.Add(new Expander { Header = "Connexion", IsExpanded = true, Content = connectionFields, HorizontalAlignment = HorizontalAlignment.Stretch });
+        Add(connectionFields, "Protocole", _protocol); Add(connectionFields, "Hôte / IP / port série", _host); Add(connectionFields, "Port réseau", _port);
+        Add(connectionFields, "Utilisateur", _user); Add(connectionFields, "Domaine RDP", _domain); Add(connectionFields, "Clé privée SSH", _key);
+        Add(connectionFields, "Bastion SSH", _jump);
+        connectionFields.Children.Add(Button("Choisir une clé…", async () => await ChooseKey()));
         Add(_serialFields, "Bauds", _baud); Add(_serialFields, "Bits", _bits); Add(_serialFields, "Parité", _parity); Add(_serialFields, "Stop", _stop); Add(_serialFields, "Flux", _flow); fields.Children.Add(_serialFields);
         fields.Children.Add(_clipboard); fields.Children.Add(_multi);
         _rdpFields.Children.Add(_share); Add(_rdpFields, "Dossier partagé", _sharePath); _rdpFields.Children.Add(Button("Choisir le dossier RDP…", async () => await ChooseRdpFolder()));
-        _rdpFields.Children.Add(new TextBlock { Text = "Le serveur pourra lire et modifier ce dossier. Accès distant : \\" + "\\tsclient\\MGRemote. Aucun partage automatique des lecteurs.", TextWrapping = TextWrapping.Wrap }); fields.Children.Add(_rdpFields);
+        Add(_rdpFields, "Couleurs (bits)", _colors); Add(_rdpFields, "Son distant", _audio); _rdpFields.Children.Add(_console);
+        _rdpFields.Children.Add(new TextBlock { Text = "Le serveur pourra lire et modifier ce dossier. Accès distant : \\" + "\\tsclient\\MGRemote. Aucun partage automatique des lecteurs.", TextWrapping = TextWrapping.Wrap }); fields.Children.Add(new Expander { Header = "Options RDP", IsExpanded = false, Content = _rdpFields, HorizontalAlignment = HorizontalAlignment.Stretch });
         var scroll = new ScrollViewer { Content = fields }; Grid.SetRow(scroll, 1); editor.Children.Add(scroll);
         var editActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6), Spacing = 5 }; editActions.Children.Add(Button("Enregistrer", Save)); editActions.Children.Add(Button("Supprimer", async () => await Delete()));
         Grid.SetRow(editActions, 2); editor.Children.Add(editActions); Grid.SetRow(editor, 2); sidebar.Children.Add(editor);
@@ -140,7 +150,7 @@ public sealed partial class MainWindow : Window
         };
         try { if (!App.Smoke) foreach (var c in Connections.Load()) _connections.Add(c); _status.Text = "Prêt — OpenSSH, FreeRDP et un terminal Linux sont requis pour les sessions."; }
         catch (Exception ex) { _storeLoaded = false; _status.Text = "Chargement : " + ex.Message + " — Écriture bloquée pour préserver le fichier existant."; }
-        foreach (var input in new[] { _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = Brushes.White; input.Foreground = Foreground; input.FontSize = 12; }
+        foreach (var input in new[] { _description, _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = Brushes.White; input.Foreground = Foreground; input.FontSize = 12; }
         _list.Background = Brushes.White; _list.Foreground = Foreground; Filter();
         New();
     }
@@ -150,7 +160,7 @@ public sealed partial class MainWindow : Window
         button.Click += (_, _) => action(); return button;
     }
     private static void Add(Panel panel, string label, Control control) { var row = new Grid { ColumnDefinitions = new ColumnDefinitions("115,*") }; row.Children.Add(new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center }); Grid.SetColumn(control, 1); row.Children.Add(control); panel.Children.Add(row); }
-    private void New() { _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = _share.IsChecked = false; _jump.Text = _sharePath.Text = ""; _folder.Text = string.Join(" > ", _selectedFolder); _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; UpdateProtocol(); }
+    private void New() { _description.Text = ""; _colors.SelectedItem = 32; _audio.SelectedIndex = 2; _console.IsChecked = false; _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = _share.IsChecked = false; _jump.Text = _sharePath.Text = ""; _folder.Text = string.Join(" > ", _selectedFolder); _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; UpdateProtocol(); }
     private void UpdateProtocol()
     {
         bool ssh = _protocol.SelectedIndex == 0, rdp = _protocol.SelectedIndex == 1, serial = _protocol.SelectedIndex == 2;
@@ -162,12 +172,13 @@ public sealed partial class MainWindow : Window
     private void Filter() => RebuildTree();
     private void Edit(Connection c)
     {
+        _description.Text = c.Description; _colors.SelectedItem = c.ColorDepth; _audio.SelectedIndex = c.AudioMode; _console.IsChecked = c.ConsoleSession;
         _editing = c; _selectedFolder = c.FolderPath; _folder.Text = string.Join(" > ", c.FolderPath); _name.Text = c.Name; _host.Text = c.Host; _protocol.SelectedIndex = c.Protocol == "Serial" ? 2 : c.Protocol == "SSH" ? 0 : 1;
         _port.Value = c.Port; _user.Text = c.User; _domain.Text = c.Domain; _key.Text = c.Identity; _clipboard.IsChecked = c.Clipboard; _multi.IsChecked = c.MultiMonitor;
         _baud.Value = c.BaudRate; _bits.Value = c.DataBits; _stop.Value = c.StopBits; _parity.SelectedItem = c.Parity; _flow.SelectedItem = c.FlowControl;
         _jump.Text = c.JumpHost; _share.IsChecked = c.RdpShareEnabled; _sharePath.Text = c.RdpSharePath;
     }
-    private Connection Read() => new() { Name = _name.Text?.Trim() ?? "", Host = _host.Text?.Trim() ?? "", Protocol = _protocol.SelectedItem?.ToString() ?? "", Port = (int)(_port.Value ?? 0), User = _user.Text?.Trim() ?? "", Domain = _domain.Text?.Trim() ?? "", Identity = _key.Text?.Trim() ?? "", Clipboard = _clipboard.IsChecked == true, MultiMonitor = _multi.IsChecked == true, BaudRate = (int)(_baud.Value ?? 0), DataBits = (int)(_bits.Value ?? 0), StopBits = (int)(_stop.Value ?? 0), Parity = _parity.SelectedItem?.ToString() ?? "", FlowControl = _flow.SelectedItem?.ToString() ?? "", FolderPath = ReadFolderPath(), JumpHost = _jump.Text?.Trim() ?? "", RdpShareEnabled = _share.IsChecked == true, RdpSharePath = _sharePath.Text?.Trim() ?? "" };
+    private Connection Read() => new() { Description = _description.Text ?? "", ColorDepth = _colors.SelectedItem is int depth ? depth : 32, AudioMode = _audio.SelectedIndex, ConsoleSession = _console.IsChecked == true, Name = _name.Text?.Trim() ?? "", Host = _host.Text?.Trim() ?? "", Protocol = _protocol.SelectedItem?.ToString() ?? "", Port = (int)(_port.Value ?? 0), User = _user.Text?.Trim() ?? "", Domain = _domain.Text?.Trim() ?? "", Identity = _key.Text?.Trim() ?? "", Clipboard = _clipboard.IsChecked == true, MultiMonitor = _multi.IsChecked == true, BaudRate = (int)(_baud.Value ?? 0), DataBits = (int)(_bits.Value ?? 0), StopBits = (int)(_stop.Value ?? 0), Parity = _parity.SelectedItem?.ToString() ?? "", FlowControl = _flow.SelectedItem?.ToString() ?? "", FolderPath = ReadFolderPath(), JumpHost = _jump.Text?.Trim() ?? "", RdpShareEnabled = _share.IsChecked == true, RdpSharePath = _sharePath.Text?.Trim() ?? "" };
     internal void VerifyProtocolPortEditing()
     {
         _editing = new Connection(); _protocol.SelectedIndex = 0; _port.Value = 22;
@@ -177,6 +188,10 @@ public sealed partial class MainWindow : Window
         if (_port.Value != 3391) throw new Exception("Changing protocol overwrote a custom port.");
         _protocol.SelectedIndex = 2;
         if (!_serialFields.IsVisible || _sftp.IsEnabled) throw new Exception("Serial UI mode is invalid.");
+        var fixture = new Connection { Name = "Options", Host = "server", Protocol = "RDP", Port = 3389, Description = "Description importée", ColorDepth = 16, AudioMode = 1, ConsoleSession = true, Clipboard = true };
+        Edit(fixture); var edited = Read();
+        if (edited.Description != fixture.Description || edited.ColorDepth != 16 || edited.AudioMode != 1 || !edited.ConsoleSession || !edited.Clipboard) throw new Exception("RDP property editing lost imported values.");
+        New(); if (Read().Description != "" || Read().AudioMode != 2 || Read().ConsoleSession) throw new Exception("New connection retained previous properties.");
         string previousStatus = _status.Text ?? ""; _storeLoaded = false; Save();
         if (!_status.Text!.Contains("non chargé")) throw new Exception("Failed-load persistence guard is missing.");
         _storeLoaded = true; _status.Text = previousStatus;

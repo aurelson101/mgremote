@@ -10,6 +10,10 @@ namespace MGRemote.Linux;
 public sealed record Connection
 {
     public string Name { get; set; } = "Nouvelle connexion";
+    public string Description { get; set; } = "";
+    public int ColorDepth { get; set; } = 32;
+    public int AudioMode { get; set; } = 2;
+    public bool ConsoleSession { get; set; }
     public string Host { get; set; } = "";
     public string Protocol { get; set; } = "SSH";
     public int Port { get; set; } = 22;
@@ -58,13 +62,20 @@ public static class Connections
             if ((string?)node.Attribute("Type") == "Container") continue;
             string protocol = Effective(node, "Protocol") ?? "";
             if (protocol != "SSH2" && protocol != "RDP") { skipped++; continue; }
-            string host = ((string?)node.Attribute("Hostname") ?? "").Trim();
+            string host = (Effective(node, "Hostname") ?? "").Trim();
             if (host.Length == 0) throw new InvalidDataException("Connexion XML sans hôte : " + ((string?)node.Attribute("Name") ?? "sans nom"));
-            int port = int.TryParse(Effective(node, "Port"), out int value) ? value : protocol == "RDP" ? 3389 : 22;
+            string? portText = Effective(node, "Port");
+            if (!string.IsNullOrEmpty(portText) && !int.TryParse(portText, out _)) throw new InvalidDataException("Port XML invalide : " + portText);
+            int port = int.TryParse(portText, out int value) ? value : protocol == "RDP" ? 3389 : 22;
+            string? colors = Effective(node, "Colors"), sound = Effective(node, "RedirectSound");
+            int depth = colors switch { null or "" or "Colors32Bit" => 32, "Colors256" => 8, "Colors15Bit" => 15, "Colors16Bit" => 16, "Colors24Bit" => 24, _ => throw new InvalidDataException("Couleurs RDP XML non reconnues : " + colors) };
+            int audio = sound switch { null or "" or "DoNotPlay" => 2, "BringToThisComputer" => 0, "LeaveAtRemoteComputer" => 1, _ => throw new InvalidDataException("Son RDP XML non reconnu : " + sound) };
             var connection = new Connection {
                 Name = (string?)node.Attribute("Name") ?? host, Host = host,
                 Protocol = protocol == "SSH2" ? "SSH" : "RDP", Port = port,
                 User = Effective(node, "Username") ?? "", Domain = Effective(node, "Domain") ?? "",
+                Description = Effective(node, "Descr") ?? "", ColorDepth = depth, AudioMode = audio,
+                Clipboard = ReadBoolean(node, "RedirectClipboard"), ConsoleSession = ReadBoolean(node, "UseConsoleSession"),
                 FolderPath = node.Ancestors().Reverse().Where(a => (string?)a.Attribute("Type") == "Container").Select(a => (string?)a.Attribute("Name") ?? "Dossier").ToArray()
             };
             Validate(connection);
@@ -73,10 +84,18 @@ public static class Connections
         if (results.Count == 0) throw new InvalidDataException("Aucune connexion SSH2/RDP explicite importable. Les fichiers entièrement chiffrés et les valeurs héritées doivent être exportés à plat sans secrets depuis Windows.");
         return results;
     }
+    private static bool ReadBoolean(XElement node, string name)
+    {
+        string? text = Effective(node, name);
+        if (string.IsNullOrEmpty(text)) return false;
+        return bool.TryParse(text, out bool value) ? value : throw new InvalidDataException("Valeur XML booléenne invalide : " + name);
+    }
     public static void Validate(Connection c)
     {
         if (c == null || c.Host == null || c.User == null || c.Domain == null || c.Identity == null || c.JumpHost == null || c.RdpSharePath == null) throw new ArgumentException("Connexion incomplète : hôte, utilisateur, domaine ou clé manquant dans les données.");
         if (string.IsNullOrWhiteSpace(c.Name) || c.Name.Length > 256 || c.Name.Any(char.IsControl)) throw new ArgumentException("Nom invalide.");
+        if (c.Description == null || c.Description.Length > 4096 || c.Description.Any(ch => char.IsControl(ch) && ch is not ('\r' or '\n' or '\t'))) throw new ArgumentException("Description invalide.");
+        if (c.ColorDepth is not (8 or 15 or 16 or 24 or 32) || c.AudioMode is < 0 or > 2) throw new ArgumentException("Couleurs ou son RDP invalides.");
         if (c.FolderPath == null || c.FolderPath.Length > 128 || c.FolderPath.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 256 || p.Any(char.IsControl))) throw new ArgumentException("Dossier de connexion invalide.");
         if (c.Protocol == "Serial") {
             if (!Regex.IsMatch(c.Host, @"\A/dev/(?:tty(?:USB|ACM|S)[0-9]+|serial/by-id/[A-Za-z0-9_.:+-]+|pts/[0-9]+)\z")) throw new ArgumentException("Port série Linux invalide (exemple : /dev/ttyUSB0).");
@@ -139,6 +158,8 @@ public static class SessionLauncher
             if (c.User.Length > 0) rdp.Add("/u:" + c.User);
             if (c.Domain.Length > 0) rdp.Add("/d:" + c.Domain);
             rdp.Add(c.Clipboard ? "+clipboard" : "-clipboard");
+            rdp.Add("/bpp:" + c.ColorDepth); rdp.Add("/audio-mode:" + c.AudioMode);
+            if (c.ConsoleSession) rdp.Add("/admin");
             if (c.MultiMonitor) rdp.Add("/multimon");
             if (c.RdpShareEnabled) rdp.Add("/drive:MGRemote," + Path.GetFullPath(c.RdpSharePath));
             return rdp; // Certificate verification is retained; no password or redirected drives.

@@ -69,6 +69,16 @@ internal static class SelfTest
             Check(Connections.Import(path).Single().Port == 3390);
             File.WriteAllText(path, "<Connections><Node Type='Connection' Name='RDP' Protocol='RDP' Hostname='server'/><Node Type='Connection' Name='Old Telnet' Protocol='Telnet' Hostname='switch'/></Connections>");
             Check(Connections.Import(path, out int ignored).Count == 1 && ignored == 1);
+            File.WriteAllText(path, "<Connections><Node Type='Container' Name='Group' Hostname='server' Colors='Colors16Bit' RedirectSound='LeaveAtRemoteComputer' RedirectClipboard='true' UseConsoleSession='true' Descr='Inherited description'><Node Type='Connection' Name='Options' Protocol='RDP' InheritHostname='true' InheritColors='true' InheritRedirectSound='true' InheritRedirectClipboard='true' InheritUseConsoleSession='true' InheritDescr='true'/></Node></Connections>");
+            var preferences = Connections.Import(path).Single();
+            Check(preferences.Host == "server" && preferences.Description == "Inherited description");
+            Check(preferences.ColorDepth == 16 && preferences.AudioMode == 1 && preferences.Clipboard && preferences.ConsoleSession);
+            var preferenceArgs = SessionLauncher.Arguments(preferences);
+            Check(preferenceArgs.Contains("/bpp:16") && preferenceArgs.Contains("/audio-mode:1") && preferenceArgs.Contains("/admin") && preferenceArgs.Contains("+clipboard"));
+            File.WriteAllText(path, "<Connections><Node Type='Connection' Name='Bad port' Protocol='RDP' Hostname='server' Port='invalid'/></Connections>");
+            bool invalidXmlRejected = false; try { Connections.Import(path); } catch (InvalidDataException) { invalidXmlRejected = true; } Check(invalidXmlRejected);
+            File.WriteAllText(path, "<Connections><Node Type='Connection' Name='Bad boolean' Protocol='RDP' Hostname='server' RedirectClipboard='invalid'/></Connections>");
+            invalidXmlRejected = false; try { Connections.Import(path); } catch (InvalidDataException) { invalidXmlRejected = true; } Check(invalidXmlRejected);
             File.WriteAllText(path, "<Connections FullFileEncryption='true'><Node Protocol='RDP' Hostname='server'/></Connections>");
             bool encryptedBlocked = false; try { Connections.Import(path); } catch (InvalidDataException) { encryptedBlocked = true; } Check(encryptedBlocked);
             File.WriteAllText(path, "<!DOCTYPE Connections [<!ENTITY secret SYSTEM 'file:///etc/passwd'>]><Connections>&secret;</Connections>");
