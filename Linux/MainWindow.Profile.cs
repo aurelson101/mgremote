@@ -81,24 +81,30 @@ public sealed partial class MainWindow
         var encrypt = new Button { Content = "Chiffrer le profil" };
         var later = Button("Plus tard — continuer sans chiffrement", () => dialog.Close());
         bool closed = false;
-        encrypt.Click += async (_, _) => {
+        Task? pendingEncryption = null;
+        async Task EncryptProfile()
+        {
             string phrase = password.Text ?? "";
             if (phrase.Length is < 12 or > 1024 || string.IsNullOrWhiteSpace(phrase) || phrase != confirmation.Text) { error.Text = "Confirmez une phrase secrète de 12 à 1024 caractères."; return; }
             encrypt.IsEnabled = later.IsEnabled = false; password.Text = confirmation.Text = "";
             ProfileKey? candidate = null;
             try {
-                var items = _connections.ToArray(); var folders = _folders.ToArray();
-                candidate = await Task.Run(() => { var key = ProfileEncryption.CreateKey(phrase); try { Connections.Save(items, folders, _dataPath, key); return key; } catch { key.Dispose(); throw; } });
-                if (!_closing) { _profileKey = candidate; candidate = null; _status.Text = "Profil complet chiffré — déverrouillage requis au prochain démarrage."; }
-                if (!closed) dialog.Close();
+                candidate = await Task.Run(() => ProfileEncryption.CreateKey(phrase));
+                if (closed || _closing) return;
+                Connections.Save(_connections, _folders, _dataPath, candidate);
+                _profileKey = candidate; candidate = null;
+                _status.Text = "Profil complet chiffré — déverrouillage requis au prochain démarrage.";
+                dialog.Close();
             } catch (Exception ex) { if (!closed) error.Text = "Chiffrement impossible : " + ex.Message; }
             finally { candidate?.Dispose(); if (!closed) encrypt.IsEnabled = later.IsEnabled = true; }
-        };
+        }
+        encrypt.Click += (_, _) => pendingEncryption = EncryptProfile();
         panel.Children.Add(encrypt); panel.Children.Add(later);
         dialog.Content = new ScrollViewer { Content = panel };
         dialog.Opened += (_, _) => { password.Focus(); opened?.Invoke(dialog); };
         dialog.Closed += (_, _) => { closed = true; password.Text = confirmation.Text = ""; };
         await dialog.ShowDialog(this);
+        if (pendingEncryption != null) await pendingEncryption;
     }
     internal async Task VerifyProfileUi()
     {
@@ -115,6 +121,12 @@ public sealed partial class MainWindow
             await OfferProfileEncryption(dialog => {
                 foreach (var input in dialog.GetLogicalDescendants().OfType<TextBox>()) input.Text = phrase;
                 Click(dialog, "Chiffrer le profil");
+                dialog.Close();
+            });
+            if (_profileKey != null || File.ReadAllText(_dataPath) != plain) throw new Exception("Closing profile encryption during key derivation changed the profile or retained its key.");
+            await OfferProfileEncryption(dialog => {
+                foreach (var input in dialog.GetLogicalDescendants().OfType<TextBox>()) input.Text = phrase;
+                Click(dialog, "Chiffrer le profil");
             });
             if (_profileKey == null || !ProfileEncryption.IsEncryptedFile(_dataPath) || Connections.LoadStore(_dataPath, _profileKey).Items.Single().Host != fixture.Host) throw new Exception("Profile encryption dialog did not protect the complete profile.");
             _profileKey.Dispose(); _profileKey = null; _storeLoaded = false;
@@ -128,7 +140,7 @@ public sealed partial class MainWindow
                 Click(dialog, "Déverrouiller");
             });
             if (unlocked == null || Connections.LoadStore(_dataPath, unlocked).Items.Single().Host != fixture.Host) throw new Exception("Profile unlock dialog lost the profile.");
-            Console.WriteLine("PASS: optional startup profile dialog skip/encrypt, canceled unlock write block and successful profile unlock; temporary profile only.");
+            Console.WriteLine("PASS: optional startup profile dialog skip/encrypt, close during key derivation preserves plaintext, canceled unlock write block and successful profile unlock; temporary profile only.");
         } finally {
             _profileKey?.Dispose(); _profileKey = null; _storeLoaded = previousLoaded;
             _connections.Clear(); foreach (var item in previousItems) _connections.Add(item);
