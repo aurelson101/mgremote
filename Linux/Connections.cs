@@ -18,6 +18,11 @@ public sealed record Connection
     public string Identity { get; set; } = "";
     public bool Clipboard { get; set; }
     public bool MultiMonitor { get; set; }
+    public int BaudRate { get; set; } = 9600;
+    public int DataBits { get; set; } = 8;
+    public string Parity { get; set; } = "none";
+    public int StopBits { get; set; } = 1;
+    public string FlowControl { get; set; } = "none";
     public override string ToString() => $"{Name}  ·  {Protocol}";
 }
 
@@ -33,19 +38,24 @@ public static class Connections
         return (string?)node.Attribute(name);
     }
     public static List<Connection> Import(string path)
+        => Import(path, out _);
+    public static List<Connection> Import(string path, out int skipped)
     {
+        skipped = 0;
         using var reader = XmlReader.Create(path, new XmlReaderSettings {
             DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 16 * 1024 * 1024 });
         var xml = XDocument.Load(reader);
         if (xml.Root?.Name.LocalName != "mrng:Connections" && xml.Root?.Name.LocalName != "Connections")
             throw new InvalidDataException("Ce fichier n’est pas un XML mRemoteNG non chiffré.");
+        if (bool.TryParse((string?)xml.Root.Attribute("FullFileEncryption"), out bool encrypted) && encrypted)
+            throw new InvalidDataException("Fichier entièrement chiffré : exportez une copie XML sans secrets depuis mRemoteNG.");
         var results = new List<Connection>();
         foreach (var node in xml.Descendants().Where(n => n.Name.LocalName == "Node")) {
             if ((string?)node.Attribute("Type") == "Container") continue;
             string protocol = Effective(node, "Protocol") ?? "";
-            if (protocol != "SSH2" && protocol != "RDP") continue;
+            if (protocol != "SSH2" && protocol != "RDP") { skipped++; continue; }
             string host = ((string?)node.Attribute("Hostname") ?? "").Trim();
-            if (host.Length == 0) continue;
+            if (host.Length == 0) throw new InvalidDataException("Connexion XML sans hôte : " + ((string?)node.Attribute("Name") ?? "sans nom"));
             int port = int.TryParse(Effective(node, "Port"), out int value) ? value : protocol == "RDP" ? 3389 : 22;
             var connection = new Connection {
                 Name = (string?)node.Attribute("Name") ?? host, Host = host,
@@ -60,7 +70,14 @@ public static class Connections
     }
     public static void Validate(Connection c)
     {
+        if (c == null || c.Host == null || c.User == null || c.Domain == null || c.Identity == null) throw new ArgumentException("Connexion incomplète : hôte, utilisateur, domaine ou clé manquant dans les données.");
         if (string.IsNullOrWhiteSpace(c.Name) || c.Name.Length > 256 || c.Name.Any(char.IsControl)) throw new ArgumentException("Nom invalide.");
+        if (c.Protocol == "Serial") {
+            if (!Regex.IsMatch(c.Host, @"\A/dev/(?:tty(?:USB|ACM|S)[0-9]+|serial/by-id/[A-Za-z0-9_.:+-]+|pts/[0-9]+)\z")) throw new ArgumentException("Port série Linux invalide (exemple : /dev/ttyUSB0).");
+            if (c.BaudRate < 50 || c.BaudRate > 4000000 || c.DataBits < 5 || c.DataBits > 8 || c.StopBits is not (1 or 2) ||
+                c.Parity is not ("none" or "even" or "odd") || c.FlowControl is not ("none" or "hardware" or "software")) throw new ArgumentException("Paramètres série invalides.");
+            return;
+        }
         if (!Regex.IsMatch(c.Host, @"\A[A-Za-z0-9_\[\]][A-Za-z0-9_.:\[\]-]{0,252}\z")) throw new ArgumentException("Hôte/IP ou alias SSH invalide.");
         if (c.Protocol != "SSH" && c.Protocol != "RDP") throw new ArgumentException("Protocole non pris en charge.");
         if (c.Port is < 1 or > 65535) throw new ArgumentException("Port invalide.");
@@ -99,6 +116,11 @@ public static class SessionLauncher
     public static List<string> Arguments(Connection c, bool sftp = false)
     {
         Connections.Validate(c);
+        if (c.Protocol == "Serial") {
+            if (sftp) throw new ArgumentException("SFTP nécessite une connexion SSH.");
+            return ["--baud", c.BaudRate.ToString(System.Globalization.CultureInfo.InvariantCulture), "--databits", c.DataBits.ToString(),
+                "--parity", c.Parity, "--stopbits", c.StopBits.ToString(), "--flow", c.FlowControl, c.Host];
+        }
         if (c.Protocol == "RDP") {
             if (sftp) throw new ArgumentException("SFTP nécessite SSH.");
             string host = c.Host.Contains(':') && !c.Host.StartsWith('[') ? "[" + c.Host + "]" : c.Host;
@@ -141,7 +163,7 @@ public static class SessionLauncher
             string? marker = new string(header, 0, key.Read(header, 0, header.Length)).Split('\n')[0].TrimEnd('\r');
             if (marker == null || !marker.StartsWith("-----BEGIN ") || !marker.EndsWith("PRIVATE KEY-----")) throw new IOException("Format OpenSSH/PEM requis ; les clés PuTTY PPK doivent être converties.");
         }
-        string executable = c.Protocol == "RDP" ? Find("xfreerdp3", "xfreerdp") : Find(sftp ? "sftp" : "ssh");
+        string executable = c.Protocol == "Serial" ? Find("picocom") : c.Protocol == "RDP" ? Find("xfreerdp3", "xfreerdp") : Find(sftp ? "sftp" : "ssh");
         string terminal = Find("gnome-terminal", "konsole", "xfce4-terminal", "xterm");
         var start = new ProcessStartInfo(terminal) { UseShellExecute = false };
         string name = Path.GetFileName(terminal);

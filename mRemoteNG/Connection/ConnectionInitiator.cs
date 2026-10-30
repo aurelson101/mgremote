@@ -79,6 +79,7 @@ namespace mRemoteNG.Connection
                     if (!ProtocolFeature.SupportBlankHostname(connectionInfo.Protocol))
                     {
                         Runtime.MessageCollector.AddMessage(MessageClass.WarningMsg, Language.ConnectionOpenFailedNoHostname);
+                        ShowConnectionError(Language.ConnectionOpenFailedNoHostname);
                         return;
                     }
 
@@ -270,12 +271,14 @@ namespace mRemoteNG.Connection
                 if (newProtocol.Initialize() == false)
                 {
                     newProtocol.Close();
+                    ShowConnectionError("Impossible d’initialiser cette connexion. Consultez le panneau Notifications pour le détail de l’erreur.");
                     return;
                 }
 
                 if (newProtocol.Connect() == false)
                 {
                     newProtocol.Close();
+                    ShowConnectionError("Impossible de démarrer cette connexion. Consultez le panneau Notifications pour le détail de l’erreur.");
                     return;
                 }
 
@@ -287,6 +290,7 @@ namespace mRemoteNG.Connection
             catch (Exception ex)
             {
                 Runtime.MessageCollector.AddExceptionStackTrace(Language.ConnectionOpenFailed, ex);
+                ShowConnectionError("Impossible d’ouvrir la connexion : " + ex.Message);
             }
             finally
             {
@@ -341,6 +345,12 @@ namespace mRemoteNG.Connection
             return null;
         }
 
+        private static void ShowConnectionError(string message)
+        {
+            var owner = Application.OpenForms.OfType<FrmMain>().FirstOrDefault();
+            if (owner == null || owner.IsDisposed || owner.Disposing) return;
+            MessageBox.Show(owner, message, "MGRemote — Connexion", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
         private static string SetConnectionPanel(ConnectionInfo connectionInfo, ConnectionInfo.Force force)
         {
             if (connectionInfo.Panel != "" && !force.HasFlag(ConnectionInfo.Force.OverridePanel) && !Properties.OptionsTabsPanelsPage.Default.AlwaysShowPanelSelectionDlg)

@@ -129,6 +129,7 @@
    <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" />
     <PackageReference Include="ConsoleControl" />
+    <PackageReference Include="System.IO.Ports" />
     <PackageReference Include="DockPanelSuite" />
     <PackageReference Include="DockPanelSuite.ThemeVS2015" />
     <PackageReference Include="Google.Protobuf" />

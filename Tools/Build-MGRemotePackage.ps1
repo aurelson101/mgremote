@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('x64','arm64')][string]$Platform = 'x64',
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.14',
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.15',
     [ValidatePattern('^[A-Fa-f0-9]{40}$')][string]$CertificateThumbprint
 )
 $ErrorActionPreference = 'Stop'
@@ -63,7 +63,7 @@ $sourceFiles += @('MGREMOTE-WINDOWS.md', 'Tools/Build-MGRemote.ps1', 'Tools/Buil
     'Tools/Configure-MGRemoteSsh.ps1', 'Tools/Sign-MGRemoteRelease.ps1', 'Tools/Test-MGRemoteSecurity.ps1', 'Tools/Test-MGRemoteInstaller.ps1', 'Tools/PanelSmoke/PanelSmoke.csproj', 'Tools/PanelSmoke/Program.cs', 'Tools/ImportSmoke/ImportSmoke.csproj', 'Tools/ImportSmoke/Program.cs', 'Tools/GuiSmoke/GuiSmoke.csproj', 'Tools/GuiSmoke/Program.cs', 'mRemoteNG/UI/DesktopAppearance.cs',
     'mRemoteNG/Security/TemporarySshKey.cs', 'mRemoteNG/Security/WindowsSecurityPolicy.cs', 'mRemoteNG/Security/SshProfileStore.cs', 'mRemoteNG/Security/UserDataCleanup.cs',
     'mRemoteNG/UI/Forms/SshProfileForm.cs', 'mRemoteNG/UI/Forms/NewConnectionForm.cs', 'mRemoteNG/UI/Forms/AnyDeskForm.cs',
-    'mRemoteNG/UI/WindowPlacement.cs', 'mRemoteNG/UI/Controls/SessionConsole.cs', 'mRemoteNG/UI/Controls/SshTerminal.cs', 'mRemoteNG/UI/Controls/PseudoTerminal.cs', 'mRemoteNG/Security/AnyDeskLauncher.cs',
+    'mRemoteNG/UI/WindowPlacement.cs', 'mRemoteNG/UI/Controls/SessionConsole.cs', 'mRemoteNG/UI/Controls/SerialSession.cs', 'mRemoteNG/UI/Forms/SerialConsoleForm.cs', 'mRemoteNG/UI/Controls/SshTerminal.cs', 'mRemoteNG/UI/Controls/PseudoTerminal.cs', 'mRemoteNG/Security/AnyDeskLauncher.cs',
     'mRemoteNG/Connection/SshIdentityPropertyDescriptor.cs', 'mRemoteNG/Connection/OpenSshTunnel.cs', 'mRemoteNG/Security/SshFileTransfer.cs',
     'mRemoteNG/UI/Forms/RdpSharingForm.cs', 'mRemoteNG/UI/Forms/SshFileTransferForm.cs', 'Installer/MGRemote.wixproj', 'Installer/MGRemote.wxs')
 $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $root 'mRemoteNG/UI/Controls/TerminalAssets') -File | ForEach-Object { 'mRemoteNG/UI/Controls/TerminalAssets/' + $_.Name })

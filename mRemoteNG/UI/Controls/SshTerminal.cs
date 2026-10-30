@@ -16,6 +16,7 @@ internal sealed class SshTerminal : UserControl
     private readonly WebView2 _view = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(24, 26, 31) };
     private readonly Label _status = new() { Dock = DockStyle.Bottom, Height = 25, Text = "Initialisation du terminal SSH…", ForeColor = Color.Silver, BackColor = Color.FromArgb(24, 26, 31) };
     private readonly PseudoTerminal _terminal = new();
+    private SerialSession _serial;
     private readonly ContextMenuStrip _clipboardMenu = new();
     private string _copySelection;
     private TaskCompletionSource _ack;
@@ -23,8 +24,8 @@ internal sealed class SshTerminal : UserControl
     private volatile bool _stopping;
     private bool _ready;
     public Task Ready { get; private set; } = Task.CompletedTask;
-    public Task ShutdownCompletion => _terminal.ShutdownCompletion;
-    public bool IsProcessRunning => !_stopping && _terminal.IsRunning;
+    public Task ShutdownCompletion => _serial?.ShutdownCompletion ?? _terminal.ShutdownCompletion;
+    public bool IsProcessRunning => !_stopping && (_serial?.IsRunning ?? _terminal.IsRunning);
     public int ProcessId => _terminal.ProcessId;
     public SshTerminal()
     {
@@ -40,6 +41,7 @@ internal sealed class SshTerminal : UserControl
         _executable = executable; _arguments = arguments;
         Ready = InitializeAsync();
     }
+    internal void StartSerial(SerialSession session) { _serial = session; _status.Text = "Initialisation du terminal série…"; Ready = InitializeAsync(); }
     private async Task InitializeAsync()
     {
         try {
@@ -88,14 +90,15 @@ internal sealed class SshTerminal : UserControl
                 case "ready":
                     if (_ready) return;
                     _ready = true;
-                    _terminal.Start(_executable, _arguments, DisplayAsync);
-                    _status.Text = "SSH • Ctrl+Maj+C : copier • Ctrl+Maj+V : coller • clic droit : menu";
+                    if (_serial != null) _serial.Start(DisplayAsync); else _terminal.Start(_executable, _arguments, DisplayAsync);
+                    _status.Text = (_serial != null ? "Série" : "SSH") + " • Ctrl+Maj+C : copier • Ctrl+Maj+V : coller • clic droit : menu";
                     FocusInput(); break;
                 case "ack": _ack?.TrySetResult(); break;
                 case "input":
-                    if (!_terminal.Send(root.GetProperty("text").GetString() ?? "")) _status.Text = "Saisie trop rapide ou session fermée : réessayez.";
+                    string input = root.GetProperty("text").GetString() ?? "";
+                    if (!IsProcessRunning || !(_serial?.Send(input) ?? _terminal.Send(input))) _status.Text = "Saisie trop rapide ou session fermée : réessayez.";
                     break;
-                case "resize": _terminal.Resize(root.GetProperty("cols").GetInt32(), root.GetProperty("rows").GetInt32()); break;
+                case "resize": if (_serial == null) _terminal.Resize(root.GetProperty("cols").GetInt32(), root.GetProperty("rows").GetInt32()); break;
                 case "copy":
                     string text = root.GetProperty("text").GetString();
                     if (!string.IsNullOrEmpty(text)) Clipboard.SetText(text);
@@ -124,9 +127,9 @@ internal sealed class SshTerminal : UserControl
     internal async Task PasteTextAsync(string text)
     {
         if (_stopping || !_ready || string.IsNullOrEmpty(text)) return;
-        if (text.Length > 65536) { _status.Text = "Collage limité à 64 Ko. Utilisez SFTP pour les fichiers."; return; }
-        if (text.Contains('\n') || text.Contains('\r'))
-            if (MessageBox.Show(this, "Ce texte contient plusieurs lignes et peut exécuter des commandes. Coller ?", "Collage SSH", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (text.Length > (_serial != null ? 4096 : 65536)) { _status.Text = _serial != null ? "Collage série limité à 4 Ko." : "Collage limité à 64 Ko. Utilisez SFTP pour les fichiers."; return; }
+        if (text.Contains('\n') || text.Contains('\r') || _serial != null)
+            if (MessageBox.Show(this, "Le collage peut envoyer et exécuter des commandes sur la destination. Coller ?", "Collage terminal", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         await _view.ExecuteScriptAsync("window.mgPaste(" + JsonSerializer.Serialize(text) + ")");
     }
     private async void PasteClipboard()
@@ -139,7 +142,7 @@ internal sealed class SshTerminal : UserControl
         }
     }
     public void FocusInput() { if (!_stopping) _view.Focus(); }
-    public void StopProcess() { _stopping = true; _ack?.TrySetResult(); _terminal.Dispose(); }
+    public void StopProcess() { _stopping = true; _ack?.TrySetResult(); _serial?.Dispose(); _terminal.Dispose(); }
     protected override void Dispose(bool disposing)
     {
         if (disposing) { StopProcess(); _clipboardMenu.Dispose(); _copySelection = null; }

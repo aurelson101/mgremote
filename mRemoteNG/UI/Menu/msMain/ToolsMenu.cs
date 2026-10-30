@@ -47,6 +47,9 @@ namespace mRemoteNG.UI.Menu
             var anyDesk = new ToolStripMenuItem("AnyDesk (optionnel)…") { Name = "mgremoteAnyDesk" };
             anyDesk.Click += (_, _) => { using var dialog = new mRemoteNG.UI.Forms.AnyDeskForm(); dialog.ShowDialog(MainForm); };
             DropDownItems.Add(anyDesk);
+            var serial = new ToolStripMenuItem("Console série (COM)…") { Name = "mgremoteSerial" };
+            serial.Click += (_, _) => new mRemoteNG.UI.Forms.SerialConsoleForm().Show(MainForm);
+            DropDownItems.Add(serial);
             Name = "mMenTools";
             Size = new System.Drawing.Size(48, 20);
             Text = Language._Tools;

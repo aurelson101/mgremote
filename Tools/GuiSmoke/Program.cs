@@ -129,6 +129,7 @@ internal static class Program
                 TestNewConnectionDialog(artifacts);
                 TestConnectionEditor(main, host, artifacts);
                 await TestDesktopAndTerminal(host, artifacts);
+                await TestSerialConsole(artifacts);
                 await TestTunnelLifecycle(artifacts);
                 TestRdpSharing(main, host, artifacts);
                 int sshCycles = 0;
@@ -148,7 +149,7 @@ internal static class Program
                 await TestPlugins(fixture);
                 var report = new { Result = "PASS", PanelsDisposed = 35, RetainedMeasuredPanels = retained, GdiObjectDelta = gdiDelta,
                     SshLayouts = sshCycles, NewConnectionDialogValidated = true, ConnectionEditorValidated = true, MultiScreenGeometryValidated = true,
-                    TerminalChildCleanupValidated = true, AnyDeskOptionalDialogValidated = true, IllegalCrossThreadChecks = true, PluginInitializationOnUiThread = true,
+                    TerminalChildCleanupValidated = true, SerialConsoleValidated = true, AnyDeskOptionalDialogValidated = true, IllegalCrossThreadChecks = true, PluginInitializationOnUiThread = true,
                     TunnelProcessOwnershipValidated = true, OptionalSshKeyEditorValidated = true,
                     RdpSharingSettingsValidated = true, RdpActiveXRedirectionValidated = true, SshClipboardTextValidated = true, ConPtyAnsiTerminalValidated = true, SftpTransferDialogValidated = true,
                     CatalogDoesNotReinitializePlugins = true, RealMixedDpiMonitorsTested = false, LiveRdpSshTested = false };
@@ -163,6 +164,38 @@ internal static class Program
         Application.Run(host);
     }
 
+    private static async Task TestSerialConsole(string artifacts)
+    {
+        var type = app.GetType("mRemoteNG.UI.Controls.SerialSession", true);
+        var validate = type.GetMethod("Validate", BindingFlags.Static | BindingFlags.NonPublic);
+        validate.Invoke(null, new object[] { "COM3", 9600, 8 });
+        bool rejected = false;
+        try { validate.Invoke(null, new object[] { "COM1 & command", 9600, 8 }); }
+        catch (TargetInvocationException e) when (e.InnerException is ArgumentException) { rejected = true; }
+        Check(rejected, "Serial validation accepted a non-COM device.");
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("\u001b[31mswitch>é\u001b[0m"); int offset = 0, closed = 0;
+        var output = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var written = new System.Collections.Concurrent.ConcurrentQueue<byte[]>();
+        Func<byte[], int> read = buffer => { if (offset < bytes.Length) { buffer[0] = bytes[offset++]; return 1; } Thread.Sleep(20); throw new TimeoutException(); };
+        Action<byte[]> write = data => written.Enqueue(data);
+        Action close = () => Interlocked.Exchange(ref closed, 1);
+        var session = Activator.CreateInstance(type, Fields, null, new object[] { read, write, close }, null);
+        try {
+            type.GetMethod("Start", Fields).Invoke(session, new object[] { new Func<string, Task>(text => { output.Enqueue(text); return Task.CompletedTask; }) });
+            Check((bool)type.GetMethod("Send", Fields).Invoke(session, new object[] { "show version\r" }), "Serial input was refused.");
+            DateTime deadline = DateTime.UtcNow.AddSeconds(3);
+            while ((string.Concat(output) != System.Text.Encoding.UTF8.GetString(bytes) || written.IsEmpty) && DateTime.UtcNow < deadline) await Task.Delay(20);
+            Check(string.Concat(output) == System.Text.Encoding.UTF8.GetString(bytes), "Serial output lost ANSI or split UTF-8 characters.");
+            Check(written.TryDequeue(out var value) && System.Text.Encoding.UTF8.GetString(value) == "show version\r", "Serial input was changed.");
+        } finally { ((IDisposable)session).Dispose(); await ((Task)type.GetProperty("ShutdownCompletion").GetValue(session)).WaitAsync(TimeSpan.FromSeconds(3)); }
+        Check(closed == 1 && !(bool)type.GetProperty("IsRunning").GetValue(session), "Serial shutdown retained its transport.");
+        using var form = (Form)Activator.CreateInstance(app.GetType("mRemoteNG.UI.Forms.SerialConsoleForm", true));
+        form.ShowInTaskbar = false; form.Opacity = 0; form.Show(); Application.DoEvents();
+        ((ComboBox)form.Controls.Find("SerialPort", true)[0]).Text = "INVALID";
+        ((Button)form.Controls.Find("SerialConnect", true)[0]).PerformClick(); Application.DoEvents();
+        Check(form.Controls.Find("SerialStatus", true)[0].Text.Contains("invalide"), "Serial console silently ignored an invalid device.");
+        using var bitmap = new Bitmap(form.Width, form.Height); form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size)); bitmap.Save(Path.Combine(artifacts, "gui-serial.png"));
+    }
     private static void TestRdpSharing(Form main, Form host, string artifacts)
     {
         var modelType = app.GetType("mRemoteNG.Connection.ConnectionInfo", true);

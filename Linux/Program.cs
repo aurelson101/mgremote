@@ -15,6 +15,8 @@ internal static class Program
     [STAThread] public static void Main(string[] args)
     {
         if (args.Contains("--self-test")) { SelfTest.Run(); return; }
+        string? serialPlan = args.FirstOrDefault(a => a.StartsWith("--serial-plan=", StringComparison.Ordinal));
+        if (serialPlan != null) { Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(SessionLauncher.Arguments(new Connection { Protocol = "Serial", Host = serialPlan[14..] }))); return; }
         AppBuilder.Configure<App>().UsePlatformDetect().StartWithClassicDesktopLifetime(args);
     }
 }
@@ -47,15 +49,22 @@ public sealed class MainWindow : Window
     private readonly ListBox _list = new() { MinWidth = 220 };
     private readonly TextBox _name = new(), _host = new(), _user = new(), _domain = new(), _key = new();
     private readonly NumericUpDown _port = new() { Minimum = 1, Maximum = 65535, Value = 22 };
-    private readonly ComboBox _protocol = new() { ItemsSource = new[] { "SSH", "RDP" }, SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox _protocol = new() { ItemsSource = new[] { "SSH", "RDP", "Serial" }, SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly NumericUpDown _baud = new() { Minimum = 50, Maximum = 4000000, Value = 9600 }, _bits = new() { Minimum = 5, Maximum = 8, Value = 8 }, _stop = new() { Minimum = 1, Maximum = 2, Value = 1 };
+    private readonly ComboBox _parity = new() { ItemsSource = new[] { "none", "even", "odd" }, SelectedIndex = 0 }, _flow = new() { ItemsSource = new[] { "none", "hardware", "software" }, SelectedIndex = 0 };
+    private readonly StackPanel _serialFields = new() { Spacing = 8, IsVisible = false };
+    private readonly TextBox _search = new() { Watermark = "Rechercher une connexion…" };
+    private readonly Button _sftp;
     private readonly CheckBox _clipboard = new() { Content = "Presse-papiers RDP bidirectionnel (texte)" };
     private readonly CheckBox _multi = new() { Content = "RDP sur plusieurs écrans" };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private Connection? _editing;
+    private bool _storeLoaded = true;
     public MainWindow()
     {
-        Title = "MGRemote Linux — Prototype 0.1.1"; Width = 1080; Height = 740; MinWidth = 760; MinHeight = 540;
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(20) };
+        Title = "MGRemote Linux — Prototype 0.1.2"; Width = 1080; Height = 780; MinWidth = 760; MinHeight = 540;
+        Background = Brush.Parse("#111827"); Foreground = Brush.Parse("#e5e7eb");
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(20), Background = Background };
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(0, 0, 0, 18) };
         toolbar.Children.Add(new TextBlock { Text = "MGRemote Linux", FontSize = 26, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         toolbar.Children.Add(Button("Nouvelle", New)); toolbar.Children.Add(Button("Importer XML…", async () => await Import()));
@@ -63,42 +72,57 @@ public sealed class MainWindow : Window
         var body = new Grid { ColumnDefinitions = new ColumnDefinitions("280,16,*") }; Grid.SetRow(body, 1);
         _list.ItemsSource = _connections;
         _list.SelectionChanged += (_, _) => { if (_list.SelectedItem is Connection c) Edit(c); };
-        body.Children.Add(_list);
+        var left = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        _search.Margin = new Thickness(0, 0, 0, 12); left.Children.Add(_search); Grid.SetRow(_list, 1); left.Children.Add(_list); body.Children.Add(left);
+        _search.TextChanged += (_, _) => Filter();
         var fields = new StackPanel { Spacing = 9 };
         Add(fields, "Nom", _name); Add(fields, "Protocole", _protocol); Add(fields, "Serveur / IP / alias SSH", _host);
         Add(fields, "Port", _port); Add(fields, "Utilisateur (facultatif)", _user); Add(fields, "Domaine RDP (facultatif)", _domain);
         Add(fields, "Clé privée SSH OpenSSH/PEM (facultative)", _key);
         fields.Children.Add(Button("Choisir une clé…", async () => await ChooseKey()));
+        Add(_serialFields, "Débit série (bauds)", _baud); Add(_serialFields, "Bits de données", _bits); Add(_serialFields, "Parité", _parity); Add(_serialFields, "Bits de stop", _stop); Add(_serialFields, "Contrôle de flux", _flow);
+        fields.Children.Add(_serialFields);
         fields.Children.Add(_clipboard); fields.Children.Add(_multi);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal };
         actions.Children.Add(Button("Enregistrer", Save)); actions.Children.Add(Button("Connecter", () => Launch(false)));
-        actions.Children.Add(Button("SFTP", () => Launch(true)));
-        fields.Children.Add(actions);
+        _sftp = Button("SFTP", () => Launch(true)); actions.Children.Add(_sftp);
         fields.Children.Add(new TextBlock { Text = "Prototype : sessions dans des fenêtres Linux séparées. Les mots de passe ne sont ni importés ni enregistrés. Clés Windows à sélectionner à nouveau sous Linux. Les profils OpenSSH locaux peuvent définir ProxyJump.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray });
-        var scroll = new ScrollViewer { Content = fields }; Grid.SetColumn(scroll, 2); body.Children.Add(scroll); root.Children.Add(body);
+        var right = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+        right.Children.Add(new ScrollViewer { Content = fields }); Grid.SetRow(actions, 1); actions.Margin = new Thickness(0, 12, 0, 0); right.Children.Add(actions);
+        Grid.SetColumn(right, 2); body.Children.Add(right); root.Children.Add(body);
         Grid.SetRow(_status, 2); _status.Margin = new Thickness(0, 14, 0, 0); root.Children.Add(_status); Content = root;
         _protocol.SelectionChanged += (_, _) => {
-            bool ssh = _protocol.SelectedIndex == 0;
-            _key.IsEnabled = ssh; _domain.IsEnabled = !ssh; _clipboard.IsEnabled = _multi.IsEnabled = !ssh;
-            if (_port.Value is 22 or 3389) _port.Value = ssh ? 22 : 3389;
+            UpdateProtocol();
         };
         try { if (!App.Smoke) foreach (var c in Connections.Load()) _connections.Add(c); _status.Text = "Prêt — OpenSSH, FreeRDP et un terminal Linux sont requis pour les sessions."; }
-        catch (Exception ex) { _status.Text = "Chargement : " + ex.Message; }
+        catch (Exception ex) { _storeLoaded = false; _status.Text = "Chargement : " + ex.Message + " — Écriture bloquée pour préserver le fichier existant."; }
+        foreach (var input in new[] { _name, _host, _user, _domain, _key, _search }) { input.Background = Brush.Parse("#1f2937"); input.Foreground = Foreground; }
+        _list.Background = Brush.Parse("#1f2937"); _list.Foreground = Foreground;
         New();
     }
     private static Button Button(string title, Action action)
     {
-        var button = new Button { Content = title, Margin = new Thickness(0, 0, 8, 4) };
+        var button = new Button { Content = title, Margin = new Thickness(0, 0, 8, 4), Background = Brush.Parse("#2563eb"), Foreground = Brushes.White };
         button.Click += (_, _) => action(); return button;
     }
     private static void Add(Panel panel, string label, Control control) { panel.Children.Add(new TextBlock { Text = label }); panel.Children.Add(control); }
-    private void New() { _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = false; }
+    private void New() { _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = false; _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; UpdateProtocol(); }
+    private void UpdateProtocol()
+    {
+        bool ssh = _protocol.SelectedIndex == 0, rdp = _protocol.SelectedIndex == 1, serial = _protocol.SelectedIndex == 2;
+        _key.IsEnabled = ssh; _domain.IsEnabled = rdp; _clipboard.IsVisible = _multi.IsVisible = rdp; _sftp.IsEnabled = ssh;
+        _serialFields.IsVisible = serial; _port.IsEnabled = _user.IsEnabled = !serial;
+        _host.Watermark = serial ? "/dev/ttyUSB0 ou /dev/serial/by-id/…" : "Serveur, adresse IP ou alias SSH";
+        if (!serial && _port.Value is 22 or 3389) _port.Value = ssh ? 22 : 3389;
+    }
+    private void Filter() { string query = _search.Text?.Trim() ?? ""; _list.ItemsSource = query.Length == 0 ? _connections : _connections.Where(c => c.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || c.Host.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray(); }
     private void Edit(Connection c)
     {
-        _editing = c; _name.Text = c.Name; _host.Text = c.Host; _protocol.SelectedIndex = c.Protocol == "SSH" ? 0 : 1;
+        _editing = c; _name.Text = c.Name; _host.Text = c.Host; _protocol.SelectedIndex = c.Protocol == "Serial" ? 2 : c.Protocol == "SSH" ? 0 : 1;
         _port.Value = c.Port; _user.Text = c.User; _domain.Text = c.Domain; _key.Text = c.Identity; _clipboard.IsChecked = c.Clipboard; _multi.IsChecked = c.MultiMonitor;
+        _baud.Value = c.BaudRate; _bits.Value = c.DataBits; _stop.Value = c.StopBits; _parity.SelectedItem = c.Parity; _flow.SelectedItem = c.FlowControl;
     }
-    private Connection Read() => new() { Name = _name.Text?.Trim() ?? "", Host = _host.Text?.Trim() ?? "", Protocol = _protocol.SelectedIndex == 0 ? "SSH" : "RDP", Port = (int)(_port.Value ?? 0), User = _user.Text?.Trim() ?? "", Domain = _domain.Text?.Trim() ?? "", Identity = _key.Text?.Trim() ?? "", Clipboard = _clipboard.IsChecked == true, MultiMonitor = _multi.IsChecked == true };
+    private Connection Read() => new() { Name = _name.Text?.Trim() ?? "", Host = _host.Text?.Trim() ?? "", Protocol = _protocol.SelectedItem?.ToString() ?? "", Port = (int)(_port.Value ?? 0), User = _user.Text?.Trim() ?? "", Domain = _domain.Text?.Trim() ?? "", Identity = _key.Text?.Trim() ?? "", Clipboard = _clipboard.IsChecked == true, MultiMonitor = _multi.IsChecked == true, BaudRate = (int)(_baud.Value ?? 0), DataBits = (int)(_bits.Value ?? 0), StopBits = (int)(_stop.Value ?? 0), Parity = _parity.SelectedItem?.ToString() ?? "", FlowControl = _flow.SelectedItem?.ToString() ?? "" };
     internal void VerifyProtocolPortEditing()
     {
         _editing = new Connection(); _protocol.SelectedIndex = 0; _port.Value = 22;
@@ -106,19 +130,25 @@ public sealed class MainWindow : Window
         if (_port.Value != 3389) throw new Exception("Editing SSH to RDP did not update the default port.");
         _port.Value = 3391; _protocol.SelectedIndex = 0;
         if (_port.Value != 3391) throw new Exception("Changing protocol overwrote a custom port.");
+        _protocol.SelectedIndex = 2;
+        if (!_serialFields.IsVisible || _sftp.IsEnabled) throw new Exception("Serial UI mode is invalid.");
+        string previousStatus = _status.Text ?? ""; _storeLoaded = false; Save();
+        if (!_status.Text!.Contains("non chargé")) throw new Exception("Failed-load persistence guard is missing.");
+        _storeLoaded = true; _status.Text = previousStatus;
         New();
     }
     private void Save()
     {
         try {
+            if (!_storeLoaded) throw new IOException("Fichier existant non chargé : corrigez-le puis relancez MGRemote. Enregistrement bloqué pour préserver vos données.");
             var item = Read(); Connections.Validate(item);
             var next = _connections.ToList(); int index = _editing == null ? -1 : next.IndexOf(_editing);
             if (index < 0) next.Add(item); else next[index] = item;
             Connections.Save(next); _connections.Clear(); foreach (var c in next) _connections.Add(c);
-            _list.SelectedItem = item; _status.Text = "Connexion enregistrée sans mot de passe.";
+            Filter(); _list.SelectedItem = item; Edit(item); _status.Text = "Connexion enregistrée sans mot de passe.";
         } catch (Exception ex) { _status.Text = ex.Message; }
     }
-    private void Launch(bool sftp) { try { SessionLauncher.Launch(Read(), sftp); _status.Text = "Session ouverte dans le terminal/client Linux. Vérifiez la clé d’hôte ou le certificat avant de poursuivre."; } catch (Exception ex) { _status.Text = ex.Message; } }
+    private void Launch(bool sftp) { try { SessionLauncher.Launch(Read(), sftp); _status.Text = _protocol.SelectedIndex == 2 ? "Console série ouverte via picocom. Quitter : Ctrl+A puis Ctrl+X. Les droits du périphérique et le câblage doivent être corrects." : "Session ouverte dans le terminal/client Linux. Vérifiez la clé d’hôte ou le certificat avant de poursuivre."; } catch (Exception ex) { _status.Text = ex.Message; } }
     private async Task ChooseKey()
     {
         try { var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Clé privée SSH — ne partagez jamais ce fichier", AllowMultiple = false }); if (files.Count > 0) _key.Text = files[0].TryGetLocalPath(); }
@@ -127,11 +157,13 @@ public sealed class MainWindow : Window
     private async Task Import()
     {
         try {
+            if (!_storeLoaded) throw new IOException("Fichier existant non chargé : import bloqué pour préserver vos données. Corrigez-le puis relancez l’application.");
             var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Importer mRemoteNG XML sans secrets", AllowMultiple = false });
             if (files.Count == 0) return;
-            var imported = await Task.Run(() => Connections.Import(files[0].TryGetLocalPath() ?? throw new IOException("Fichier local requis.")));
+            var result = await Task.Run(() => { var items = Connections.Import(files[0].TryGetLocalPath() ?? throw new IOException("Fichier local requis."), out int ignored); return (Items: items, Ignored: ignored); });
+            var imported = result.Items;
             Connections.Save(_connections.Concat(imported)); foreach (var c in imported) _connections.Add(c);
-            _status.Text = $"{imported.Count} connexions importées. Héritage protocole/port/utilisateur/domaine résolu ; mots de passe, clés et options Windows exclus. Vérifiez les valeurs avant connexion.";
+            Filter(); _status.Text = $"{imported.Count} connexions importées ; {result.Ignored} protocoles non pris en charge ignorés. Héritage résolu ; secrets et options Windows exclus. Vérifiez les valeurs avant connexion.";
         } catch (Exception ex) { _status.Text = "Import annulé, connexions existantes conservées : " + ex.Message; }
     }
 }

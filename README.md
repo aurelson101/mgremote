@@ -6,14 +6,15 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 
 | Platform | Current package | Status |
 | --- | --- | --- |
-| Windows x64 | [MSI 0.1.14](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.14) | Unsigned preview |
-| Linux x86-64 | [AppImage 0.1.1](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.1.1) | Unsigned prototype; separate session windows |
+| Windows x64 | [MSI 0.1.15](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.15) | Unsigned preview |
+| Linux x86-64 | [AppImage 0.1.2](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.1.2) | Unsigned prototype; separate session windows |
 
 Download the installer or AppImage from the matching release. SHA-256 manifests and corresponding source archives accompany the packages. The editions have independent version numbers and are not feature-equivalent.
 
 ## Windows edition
 
 - Tabbed RDP, SSH and VNC connections, with a separate connection-properties panel.
+- Tools → Serial console (COM): integrated ANSI terminal, configurable baud rate, 5–8 data bits, parity, 1/2 stop bits, flow control and optional DTR. Default: 9600 baud, 8N1, no flow control. Serial sessions use independent windows, not imported XML tree nodes.
 - Integrated ANSI/VT SSH terminal using Windows OpenSSH, ConPTY and locally bundled xterm.js. Imported SSH2 connections use this terminal even if their saved backend still says PuTTYNG.
 - Optional OpenSSH/PEM private keys, native interactive passphrase/password prompts, OpenSSH profiles and managed SSH bastion tunnels.
 - SSH copy/paste with Ctrl+Shift+C / Ctrl+Shift+V or the context menu. Multiline paste requires confirmation; Ctrl+C remains an interrupt.
@@ -27,24 +28,26 @@ Install the MSI normally. Windows OpenSSH Client and the Microsoft Edge WebView2
 Silent installation and removal use standard Windows Installer commands:
 
 ```powershell
-msiexec /i "MGRemote-0.1.14-win-x64-preview.msi" /qn /norestart
-msiexec /x "MGRemote-0.1.14-win-x64-preview.msi" /qn /norestart
+msiexec /i "MGRemote-0.1.15-win-x64-preview.msi" /qn /norestart
+msiexec /x "MGRemote-0.1.15-win-x64-preview.msi" /qn /norestart
 ```
 
 Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly requests cleanup of app-owned data for the current interactive user. It does not erase operating-system or antivirus records, other users' profiles, documents or personal SSH keys. See [Windows implementation notes](MGREMOTE-WINDOWS.md).
 
 ## Linux prototype
 
-The Linux edition uses Avalonia and a bundled .NET runtime. It provides connection creation/editing, local metadata storage, XML metadata import, optional SSH keys, interactive SFTP, RDP clipboard selection and multiple-monitor requests. SSH/SFTP use the installed Linux terminal; RDP uses the installed FreeRDP client. Sessions open in separate windows, not integrated tabs.
+The Linux edition uses Avalonia and a bundled .NET runtime. It provides connection creation/editing, local metadata storage, XML metadata import, optional SSH keys, interactive SFTP, RDP clipboard selection and multiple-monitor requests. SSH/SFTP use the installed Linux terminal; RDP uses the installed FreeRDP client. Sessions open in separate windows, not integrated tabs. Serial profiles can also be saved: select Serial, enter a Linux device such as `/dev/ttyUSB0` or `/dev/serial/by-id/...`, and set baud rate, bits, parity and flow control. Install `picocom`; the app does not change device permissions or run sudo. Exit picocom with Ctrl+A then Ctrl+X.
 
 ```sh
-chmod +x MGRemote-Linux-0.1.1-x86_64.AppImage
-./MGRemote-Linux-0.1.1-x86_64.AppImage
+chmod +x MGRemote-Linux-0.1.2-x86_64.AppImage
+./MGRemote-Linux-0.1.2-x86_64.AppImage
 ```
 
-Install OpenSSH Client, FreeRDP, a supported terminal (GNOME Terminal, Konsole, XFCE Terminal or xterm), and the [Avalonia Linux native dependencies](https://docs.avaloniaui.net/docs/deployment/linux) using your distribution's package manager. An X11/XWayland desktop is required by this prototype. .NET is bundled; the remote clients and desktop libraries are not. If FUSE is unavailable, try `./MGRemote-Linux-0.1.1-x86_64.AppImage --appimage-extract-and-run`.
+Install OpenSSH Client, FreeRDP, a supported terminal (GNOME Terminal, Konsole, XFCE Terminal or xterm), and the [Avalonia Linux native dependencies](https://docs.avaloniaui.net/docs/deployment/linux) using your distribution's package manager. An X11/XWayland desktop is required by this prototype. .NET is bundled; the remote clients and desktop libraries are not. If FUSE is unavailable, try `./MGRemote-Linux-0.1.2-x86_64.AppImage --appimage-extract-and-run`.
 
 XML import does not migrate passwords, Windows key paths, Windows vault data or arbitrary SSH options. Protocol, port, username and domain inheritance is resolved from parent folders. Select an existing Linux OpenSSH/PEM key with private permissions, then review the connection before use. Existing OpenSSH aliases may define ProxyJump. See [Linux instructions](Linux/README.md).
+
+Import now reports unsupported protocols instead of silently hiding the skipped count. Fully encrypted XML is rejected with guidance. If stored Linux connection data cannot be loaded, saving/importing is blocked to prevent overwriting the existing file. The Linux editor includes a search field and keeps action buttons visible while the form scrolls.
 
 ## Security and validation status
 
@@ -53,6 +56,10 @@ These are unsigned development releases. Antivirus results describe a particular
 Windows validation includes targeted security checks, synthetic XML/RDP imports, GUI lifecycle checks, actual offline RDP ActiveX redirection settings, ConPTY terminal rendering and input, context-menu lifecycle, owned-process cleanup and MSI table/maintenance checks. The release includes its Sophos scan result.
 
 Linux validation uses synthetic metadata/argument/import checks. The manually triggered [Linux workflow](.github/workflows/mgremote-linux.yml) builds the AppImage, runs its self-test on Ubuntu and renders its GUI under Xvfb. Check the workflow result and the release manifest for the exact tested environment.
+
+Review covers maintained connection, import, persistence, terminal and lifecycle paths, plus compilation and dependency checks; it is not a claim that all upstream and third-party code is defect-free.
+
+Physical USB/serial adapters and real switch consoles remain untested. Serial transport tests cover ANSI/split UTF-8, input delivery and cleanup; Linux validation also uses picocom with pseudo-terminals. SSH1 and Telnet remain disabled by default; serial access does not weaken SSH host-key or RDP certificate checks.
 
 Live RDP/SSH authentication, real remote file transfer, mixed-DPI/hot-plug monitors and clean-machine Windows installation/removal have not been validated in this project session. RDP through an SSH loopback tunnel may fail certificate-name checks; authentication is not weakened to hide that limitation. Linux desktop/distribution compatibility and live sessions require a pilot.
 
