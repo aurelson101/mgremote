@@ -10,6 +10,9 @@ namespace MGRemote.Linux;
 public sealed record Connection
 {
     public string Name { get; set; } = "Nouvelle connexion";
+    public string EncryptedPassword { get; set; } = "";
+    public string GatewayHost { get; set; } = "";
+    public string GatewayMode { get; set; } = "direct";
     public string Description { get; set; } = "";
     public int ColorDepth { get; set; } = 32;
     public int AudioMode { get; set; } = 2;
@@ -47,7 +50,7 @@ public static class Connections
     }
     public static List<Connection> Import(string path)
         => Import(path, out _);
-    public static List<Connection> Import(string path, out int skipped)
+    public static List<Connection> Import(string path, out int skipped, string? sourcePassword = null, string? localPassword = null)
     {
         skipped = 0;
         using var reader = XmlReader.Create(path, new XmlReaderSettings {
@@ -55,8 +58,19 @@ public static class Connections
         var xml = XDocument.Load(reader);
         if (xml.Root?.Name.LocalName != "mrng:Connections" && xml.Root?.Name.LocalName != "Connections")
             throw new InvalidDataException("Ce fichier n’est pas un XML mRemoteNG non chiffré.");
-        if (bool.TryParse((string?)xml.Root.Attribute("FullFileEncryption"), out bool encrypted) && encrypted)
-            throw new InvalidDataException("Fichier entièrement chiffré : exportez une copie XML sans secrets depuis mRemoteNG.");
+        string sourceKey = sourcePassword ?? "mR3m";
+        if (localPassword != null && xml.Root.Attribute("Protected") is { } protection) {
+            string marker = XmlSecrets.DecryptSource(protection.Value, sourceKey, xml.Root);
+            if (marker is not ("ThisIsProtected" or "ThisIsNotProtected")) throw new System.Security.Cryptography.CryptographicException("Authentification XML invalide.");
+        }
+        if (bool.TryParse((string?)xml.Root.Attribute("FullFileEncryption"), out bool encrypted) && encrypted) {
+            string content = XmlSecrets.DecryptSource(xml.Root.Value, sourceKey, xml.Root);
+            string wrapper = new XElement("Connections", xml.Root.Attributes().Where(a => a.IsNamespaceDeclaration)).ToString(SaveOptions.DisableFormatting);
+            using var innerReader = XmlReader.Create(new StringReader(wrapper[..^2] + ">" + content + "</Connections>"), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 16 * 1024 * 1024 });
+            var inner = XDocument.Load(innerReader);
+            xml.Root.ReplaceNodes(inner.Root!.Nodes());
+        }
+        int secretCount = 0; long sourceWork = 0;
         var results = new List<Connection>();
         foreach (var node in xml.Descendants().Where(n => n.Name.LocalName == "Node")) {
             if ((string?)node.Attribute("Type") == "Container") continue;
@@ -78,6 +92,22 @@ public static class Connections
                 Clipboard = ReadBoolean(node, "RedirectClipboard"), ConsoleSession = ReadBoolean(node, "UseConsoleSession"),
                 FolderPath = node.Ancestors().Reverse().Where(a => (string?)a.Attribute("Type") == "Container").Select(a => (string?)a.Attribute("Name") ?? "Dossier").ToArray()
             };
+            if (protocol == "RDP") {
+                string usage = Effective(node, "RDGatewayUsageMethod") ?? "Never";
+                if (usage != "Never") {
+                    connection.GatewayMode = usage switch { "Always" => "direct", "Detect" => "detect", _ => throw new InvalidDataException("Mode de passerelle XML non reconnu.") };
+                    connection.GatewayHost = Effective(node, "RDGatewayHostname") ?? "";
+                    if (connection.GatewayHost.Length == 0) throw new InvalidDataException("Passerelle XML sans hôte.");
+                }
+            }
+            if (localPassword != null && Effective(node, "Password") is { Length: > 0 } cipherText) {
+                int sourceIterations = int.TryParse((string?)xml.Root.Attribute("KdfIterations"), out int work) ? work : 1000;
+                sourceWork += sourceIterations;
+                if (++secretCount > 64 || sourceWork > 10000000) throw new InvalidDataException("Import trop coûteux : limitez l’export à 64 secrets par opération (budget KDF dépassé).");
+                string plainPassword = XmlSecrets.DecryptSource(cipherText, sourceKey, xml.Root);
+                if (System.Text.Encoding.UTF8.GetByteCount(plainPassword) > 4096) throw new InvalidDataException("Mot de passe XML trop volumineux.");
+                connection.EncryptedPassword = XmlSecrets.Protect(plainPassword, localPassword);
+            }
             Validate(connection);
             results.Add(connection);
         }
@@ -94,6 +124,9 @@ public static class Connections
     {
         if (c == null || c.Host == null || c.User == null || c.Domain == null || c.Identity == null || c.JumpHost == null || c.RdpSharePath == null) throw new ArgumentException("Connexion incomplète : hôte, utilisateur, domaine ou clé manquant dans les données.");
         if (string.IsNullOrWhiteSpace(c.Name) || c.Name.Length > 256 || c.Name.Any(char.IsControl)) throw new ArgumentException("Nom invalide.");
+        if (c.EncryptedPassword == null || c.EncryptedPassword.Length > 16384 || (c.EncryptedPassword.Length > 0 && !c.EncryptedPassword.StartsWith("v1:"))) throw new ArgumentException("Secret local non valide.");
+        if (c.GatewayHost == null || c.GatewayMode is not ("direct" or "detect")) throw new ArgumentException("Passerelle RDP non valide.");
+        if (c.GatewayHost.Length > 0 && (!Regex.IsMatch(c.GatewayHost, @"\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,252}(?::[0-9]{1,5})?\z") || (c.GatewayHost.Contains(':') && (!int.TryParse(c.GatewayHost.Split(':')[1], out int gatewayPort) || gatewayPort is < 1 or > 65535)))) throw new ArgumentException("Hôte ou port de passerelle RDP invalide.");
         if (c.Description == null || c.Description.Length > 4096 || c.Description.Any(ch => char.IsControl(ch) && ch is not ('\r' or '\n' or '\t'))) throw new ArgumentException("Description invalide.");
         if (c.ColorDepth is not (8 or 15 or 16 or 24 or 32) || c.AudioMode is < 0 or > 2) throw new ArgumentException("Couleurs ou son RDP invalides.");
         if (c.FolderPath == null || c.FolderPath.Length > 128 || c.FolderPath.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 256 || p.Any(char.IsControl))) throw new ArgumentException("Dossier de connexion invalide.");
@@ -160,6 +193,7 @@ public static class SessionLauncher
             rdp.Add(c.Clipboard ? "+clipboard" : "-clipboard");
             rdp.Add("/bpp:" + c.ColorDepth); rdp.Add("/audio-mode:" + c.AudioMode);
             if (c.ConsoleSession) rdp.Add("/admin");
+            if (c.GatewayHost.Length > 0) rdp.Add("/gateway:g:" + c.GatewayHost + ",usage-method:" + c.GatewayMode);
             if (c.MultiMonitor) rdp.Add("/multimon");
             if (c.RdpShareEnabled) rdp.Add("/drive:MGRemote," + Path.GetFullPath(c.RdpSharePath));
             return rdp; // Certificate verification is retained; no password or redirected drives.

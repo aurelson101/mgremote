@@ -55,6 +55,34 @@ internal static class SelfTest
         Check(SessionLauncher.Arguments(rdpShare).Contains("/drive:MGRemote," + share));
         Check(!SessionLauncher.Arguments(rdpShare with { RdpShareEnabled = false }).Any(a => a.StartsWith("/drive:")));
         foreach (string badShare in new[] { "relative/path", share + ",extra", share + "\nother" }) Reject(() => Connections.Validate(rdpShare with { RdpSharePath = badShare }));
+        string MakeSource(string plain, string engine = "AES", string mode = "GCM")
+        {
+            byte[] salt = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray(), nonce = Enumerable.Range(16, 16).Select(i => (byte)i).ToArray();
+            byte[] key = System.Security.Cryptography.Rfc2898DeriveBytes.Pbkdf2("fixture-master", salt, 1000, System.Security.Cryptography.HashAlgorithmName.SHA1, 32);
+            Org.BouncyCastle.Crypto.IBlockCipher block = engine switch { "Twofish" => new Org.BouncyCastle.Crypto.Engines.TwofishEngine(), "Serpent" => new Org.BouncyCastle.Crypto.Engines.SerpentEngine(), _ => new Org.BouncyCastle.Crypto.Engines.AesEngine() };
+            Org.BouncyCastle.Crypto.Modes.IAeadBlockCipher cipher = mode == "EAX" ? new Org.BouncyCastle.Crypto.Modes.EaxBlockCipher(block) : new Org.BouncyCastle.Crypto.Modes.GcmBlockCipher(block);
+            cipher.Init(true, new Org.BouncyCastle.Crypto.Parameters.AeadParameters(new Org.BouncyCastle.Crypto.Parameters.KeyParameter(key), 128, nonce, salt));
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(plain), output = new byte[cipher.GetOutputSize(bytes.Length)];
+            int n = cipher.ProcessBytes(bytes, 0, bytes.Length, output, 0); n += cipher.DoFinal(output, n);
+            return Convert.ToBase64String([..salt, ..nonce, ..output[..n]]);
+        }
+        foreach (string engine in new[] { "AES", "Twofish", "Serpent" }) foreach (string mode in new[] { "GCM", "EAX" }) {
+            var root = System.Xml.Linq.XElement.Parse($"<Connections EncryptionEngine='{engine}' BlockCipherMode='{mode}' KdfIterations='1000'/>");
+            Check(XmlSecrets.DecryptSource(MakeSource("fixture-password", engine, mode), "fixture-master", root) == "fixture-password");
+        }
+        var cryptoRoot = System.Xml.Linq.XElement.Parse("<Connections/>");
+        void CryptoReject(Action action) { bool denied = false; try { action(); } catch (System.Security.Cryptography.CryptographicException) { denied = true; } Check(denied); }
+        CryptoReject(() => XmlSecrets.DecryptSource(MakeSource("fixture-password"), "wrong-master", cryptoRoot));
+        byte[] tampered = Convert.FromBase64String(MakeSource("fixture-password")); tampered[^1] ^= 1;
+        CryptoReject(() => XmlSecrets.DecryptSource(Convert.ToBase64String(tampered), "fixture-master", cryptoRoot));
+        string localEnvelope = XmlSecrets.Protect("fixture-password", "local-master-passphrase");
+        Check(XmlSecrets.Unprotect(localEnvelope, "local-master-passphrase") == "fixture-password");
+        Check(localEnvelope != XmlSecrets.Protect("fixture-password", "local-master-passphrase"));
+        CryptoReject(() => XmlSecrets.Unprotect(localEnvelope, "wrong-local-master"));
+        Reject(() => XmlSecrets.Protect("fixture-password", "short"));
+        var gateway = new Connection { Host = "server", Protocol = "RDP", Port = 3389, GatewayHost = "gateway.example:443", GatewayMode = "detect" };
+        Check(SessionLauncher.Arguments(gateway).Contains("/gateway:g:gateway.example:443,usage-method:detect"));
+        foreach (string badGateway in new[] { "gateway,p:secret", "-gateway", "gateway:65536", "gateway\nother" }) Reject(() => Connections.Validate(gateway with { GatewayHost = badGateway }));
         string path = Path.Combine(Path.GetTempPath(), "mgremote-linux-test-" + Guid.NewGuid().ToString("N") + ".xml");
         try {
             File.WriteAllText(path, "<Connections><Node Type='Connection' Name='Linux' Protocol='SSH2' Hostname='server' Username='alice' Port='2222' Password='DO-NOT-IMPORT' SSHOptions='-i windows-key'/></Connections>");
@@ -79,8 +107,20 @@ internal static class SelfTest
             bool invalidXmlRejected = false; try { Connections.Import(path); } catch (InvalidDataException) { invalidXmlRejected = true; } Check(invalidXmlRejected);
             File.WriteAllText(path, "<Connections><Node Type='Connection' Name='Bad boolean' Protocol='RDP' Hostname='server' RedirectClipboard='invalid'/></Connections>");
             invalidXmlRejected = false; try { Connections.Import(path); } catch (InvalidDataException) { invalidXmlRejected = true; } Check(invalidXmlRejected);
+            string body = "<Node Type='Connection' Name='Encrypted' Protocol='RDP' Hostname='server' Password='" + MakeSource("fixture-password") + "' RDGatewayUsageMethod='Always' RDGatewayHostname='gateway.example'/>";
+            File.WriteAllText(path, "<Connections FullFileEncryption='true'>" + MakeSource(body) + "</Connections>");
+            var withSecret = Connections.Import(path, out _, "fixture-master", "local-master-passphrase").Single();
+            Check(XmlSecrets.Unprotect(withSecret.EncryptedPassword, "local-master-passphrase") == "fixture-password");
+            Check(!System.Text.Json.JsonSerializer.Serialize(withSecret).Contains("fixture-password"));
+            Check(withSecret.GatewayHost == "gateway.example" && withSecret.GatewayMode == "direct");
+            Check(Connections.Import(path, out _, "fixture-master").Single().EncryptedPassword == "");
+            File.WriteAllText(path, "<Connections xmlns:n='urn:fixture' FullFileEncryption='true'>" + MakeSource(body.Replace("<Node ", "<n:Node ")) + "</Connections>");
+            Check(Connections.Import(path, out _, "fixture-master").Single().Host == "server");
+            CryptoReject(() => Connections.Import(path, out _, "wrong-master", "local-master-passphrase"));
+            File.WriteAllText(path, "<Connections FullFileEncryption='true'>" + MakeSource("<!DOCTYPE bad><Node/>") + "</Connections>");
+            bool innerDtdBlocked = false; try { Connections.Import(path, out _, "fixture-master"); } catch (System.Xml.XmlException) { innerDtdBlocked = true; } Check(innerDtdBlocked);
             File.WriteAllText(path, "<Connections FullFileEncryption='true'><Node Protocol='RDP' Hostname='server'/></Connections>");
-            bool encryptedBlocked = false; try { Connections.Import(path); } catch (InvalidDataException) { encryptedBlocked = true; } Check(encryptedBlocked);
+            bool encryptedBlocked = false; try { Connections.Import(path); } catch (System.Security.Cryptography.CryptographicException) { encryptedBlocked = true; } Check(encryptedBlocked);
             File.WriteAllText(path, "<!DOCTYPE Connections [<!ENTITY secret SYSTEM 'file:///etc/passwd'>]><Connections>&secret;</Connections>");
             bool blocked = false; try { Connections.Import(path); } catch (System.Xml.XmlException) { blocked = true; } Check(blocked);
         } finally { File.Delete(path); }

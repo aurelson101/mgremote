@@ -58,7 +58,7 @@ $source = Join-Path $release "MGRemote-Linux-$Version-source.zip"
 $sourceTree = Join-Path $release 'source-tree'
 $linuxSource = Join-Path $sourceTree 'Linux'
 New-Item -ItemType Directory -Force $linuxSource | Out-Null
-foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','Program.cs','MainWindow.Sessions.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Build-AppImage.ps1','README.md','Licenses')) {
+foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','XmlSecrets.cs','MainWindow.Secrets.cs','Program.cs','MainWindow.Sessions.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Build-AppImage.ps1','README.md','Licenses')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $linuxSource -Recurse
 }
 Copy-Item -LiteralPath (Join-Path $root 'COPYING.txt') -Destination $sourceTree

@@ -22,3 +22,13 @@ Native session maintenance is driven by X11 structural events and parent size ch
 Connections can use an optional SSH bastion alias defined in ~/.ssh/config (including its own key/user/port), shared by SSH and SFTP. RDP can explicitly share one selected local folder, read/write; disabled by default. The server can access it as \\tsclient\MGRemote. Connection duplication creates an editable copy without changing the source. Editing preserves imported folder names containing the display separator. Managed RDP/VNC bastion tunnels remain incomplete.
 
 The next Linux development changes group connection properties into collapsible sections and import description, inherited host, clipboard, console session, color depth and audio redirection from mRemoteNG XML. Invalid explicit ports and boolean values abort import instead of silently substituting defaults. Encrypted files/secrets, unsupported protocols and other unmapped Windows options are still not fully compatible.
+
+## Encrypted import on the development branch
+
+XML full-file and individual-password import supports AES, Twofish and Serpent with GCM/EAX, using the upstream salt/nonce/authentication layout and PBKDF2-HMAC-SHA1 compatibility. Legacy Rijndael and CCM are explicitly unsupported. XML source KDF counts are restricted to 1000–1000000; secret imports have a 64-secret / 10-million-source-iteration budget per operation. Unsupported protocols and unmapped attributes are still not fully compatible.
+
+After choosing an XML, enter its master password (blank uses mRemoteNG's known default key). Password import is optional. When selected, choose and confirm a distinct local passphrase of at least 12 characters. Each connection password is reencrypted with AES-256-GCM, a fresh 16-byte salt and 12-byte nonce, PBKDF2-HMAC-SHA256 with 600000 iterations and an authenticated version marker. Only the encrypted envelope enters connections.json; neither master passphrase is persisted. The source file remains unchanged. Back up the local passphrase securely: there is no recovery.
+
+Select a connection and choose **Secret importé…** to unlock its password temporarily. It remains masked until explicitly shown; nothing is automatically copied or sent to SSH/RDP/SFTP. Automatic credential injection, gateway passwords/access tokens and a desktop keyring are not implemented. Managed plaintext strings can remain in process memory until garbage collection; closing the dialog clears its controls but does not guarantee memory erasure.
+
+RDP gateway hostname/port and direct/detect usage are editable and imported from RDGatewayUsageMethod/RDGatewayHostname. Gateway authentication remains interactive; certificate validation and NLA remain enabled. Live gateway connections still require testing.

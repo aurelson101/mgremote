@@ -49,6 +49,9 @@ public sealed partial class MainWindow : Window
 {
     private readonly ObservableCollection<Connection> _connections = [];
     private readonly TreeView _list = new() { MinWidth = 220 };
+    private string _encryptedPassword = "";
+    private readonly TextBox _gateway = new() { PlaceholderText = "Passerelle.example:443 (facultatif)" };
+    private readonly ComboBox _gatewayMode = new() { ItemsSource = new[] { "direct", "detect" }, SelectedIndex = 0 };
     private readonly TextBox _folder = new();
     private readonly TextBox _description = new() { AcceptsReturn = true, MinHeight = 56, MaxHeight = 120, TextWrapping = TextWrapping.Wrap };
     private readonly ComboBox _colors = new() { ItemsSource = new[] { 8, 15, 16, 24, 32 }, SelectedIndex = 4 };
@@ -123,8 +126,10 @@ public sealed partial class MainWindow : Window
         Add(_serialFields, "Bauds", _baud); Add(_serialFields, "Bits", _bits); Add(_serialFields, "Parité", _parity); Add(_serialFields, "Stop", _stop); Add(_serialFields, "Flux", _flow); fields.Children.Add(_serialFields);
         fields.Children.Add(_clipboard); fields.Children.Add(_multi);
         _rdpFields.Children.Add(_share); Add(_rdpFields, "Dossier partagé", _sharePath); _rdpFields.Children.Add(Button("Choisir le dossier RDP…", async () => await ChooseRdpFolder()));
+        Add(_rdpFields, "Passerelle RDP", _gateway); Add(_rdpFields, "Mode passerelle", _gatewayMode);
         Add(_rdpFields, "Couleurs (bits)", _colors); Add(_rdpFields, "Son distant", _audio); _rdpFields.Children.Add(_console);
         _rdpFields.Children.Add(new TextBlock { Text = "Le serveur pourra lire et modifier ce dossier. Accès distant : \\" + "\\tsclient\\MGRemote. Aucun partage automatique des lecteurs.", TextWrapping = TextWrapping.Wrap }); fields.Children.Add(new Expander { Header = "Options RDP", IsExpanded = false, Content = _rdpFields, HorizontalAlignment = HorizontalAlignment.Stretch });
+        fields.Children.Add(Button("Secret importé…", async () => await RevealImportedSecret()));
         var scroll = new ScrollViewer { Content = fields }; Grid.SetRow(scroll, 1); editor.Children.Add(scroll);
         var editActions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6), Spacing = 5 }; editActions.Children.Add(Button("Enregistrer", Save)); editActions.Children.Add(Button("Supprimer", async () => await Delete()));
         Grid.SetRow(editActions, 2); editor.Children.Add(editActions); Grid.SetRow(editor, 2); sidebar.Children.Add(editor);
@@ -160,7 +165,7 @@ public sealed partial class MainWindow : Window
         button.Click += (_, _) => action(); return button;
     }
     private static void Add(Panel panel, string label, Control control) { var row = new Grid { ColumnDefinitions = new ColumnDefinitions("115,*") }; row.Children.Add(new TextBlock { Text = label, FontSize = 12, VerticalAlignment = VerticalAlignment.Center }); Grid.SetColumn(control, 1); row.Children.Add(control); panel.Children.Add(row); }
-    private void New() { _description.Text = ""; _colors.SelectedItem = 32; _audio.SelectedIndex = 2; _console.IsChecked = false; _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = _share.IsChecked = false; _jump.Text = _sharePath.Text = ""; _folder.Text = string.Join(" > ", _selectedFolder); _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; UpdateProtocol(); }
+    private void New() { _encryptedPassword = ""; _gateway.Text = ""; _gatewayMode.SelectedIndex = 0; _description.Text = ""; _colors.SelectedItem = 32; _audio.SelectedIndex = 2; _console.IsChecked = false; _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = _share.IsChecked = false; _jump.Text = _sharePath.Text = ""; _folder.Text = string.Join(" > ", _selectedFolder); _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; UpdateProtocol(); }
     private void UpdateProtocol()
     {
         bool ssh = _protocol.SelectedIndex == 0, rdp = _protocol.SelectedIndex == 1, serial = _protocol.SelectedIndex == 2;
@@ -172,13 +177,14 @@ public sealed partial class MainWindow : Window
     private void Filter() => RebuildTree();
     private void Edit(Connection c)
     {
+        _encryptedPassword = c.EncryptedPassword; _gateway.Text = c.GatewayHost; _gatewayMode.SelectedItem = c.GatewayMode;
         _description.Text = c.Description; _colors.SelectedItem = c.ColorDepth; _audio.SelectedIndex = c.AudioMode; _console.IsChecked = c.ConsoleSession;
         _editing = c; _selectedFolder = c.FolderPath; _folder.Text = string.Join(" > ", c.FolderPath); _name.Text = c.Name; _host.Text = c.Host; _protocol.SelectedIndex = c.Protocol == "Serial" ? 2 : c.Protocol == "SSH" ? 0 : 1;
         _port.Value = c.Port; _user.Text = c.User; _domain.Text = c.Domain; _key.Text = c.Identity; _clipboard.IsChecked = c.Clipboard; _multi.IsChecked = c.MultiMonitor;
         _baud.Value = c.BaudRate; _bits.Value = c.DataBits; _stop.Value = c.StopBits; _parity.SelectedItem = c.Parity; _flow.SelectedItem = c.FlowControl;
         _jump.Text = c.JumpHost; _share.IsChecked = c.RdpShareEnabled; _sharePath.Text = c.RdpSharePath;
     }
-    private Connection Read() => new() { Description = _description.Text ?? "", ColorDepth = _colors.SelectedItem is int depth ? depth : 32, AudioMode = _audio.SelectedIndex, ConsoleSession = _console.IsChecked == true, Name = _name.Text?.Trim() ?? "", Host = _host.Text?.Trim() ?? "", Protocol = _protocol.SelectedItem?.ToString() ?? "", Port = (int)(_port.Value ?? 0), User = _user.Text?.Trim() ?? "", Domain = _domain.Text?.Trim() ?? "", Identity = _key.Text?.Trim() ?? "", Clipboard = _clipboard.IsChecked == true, MultiMonitor = _multi.IsChecked == true, BaudRate = (int)(_baud.Value ?? 0), DataBits = (int)(_bits.Value ?? 0), StopBits = (int)(_stop.Value ?? 0), Parity = _parity.SelectedItem?.ToString() ?? "", FlowControl = _flow.SelectedItem?.ToString() ?? "", FolderPath = ReadFolderPath(), JumpHost = _jump.Text?.Trim() ?? "", RdpShareEnabled = _share.IsChecked == true, RdpSharePath = _sharePath.Text?.Trim() ?? "" };
+    private Connection Read() => new() { EncryptedPassword = _encryptedPassword, GatewayHost = _gateway.Text?.Trim() ?? "", GatewayMode = _gatewayMode.SelectedItem?.ToString() ?? "direct", Description = _description.Text ?? "", ColorDepth = _colors.SelectedItem is int depth ? depth : 32, AudioMode = _audio.SelectedIndex, ConsoleSession = _console.IsChecked == true, Name = _name.Text?.Trim() ?? "", Host = _host.Text?.Trim() ?? "", Protocol = _protocol.SelectedItem?.ToString() ?? "", Port = (int)(_port.Value ?? 0), User = _user.Text?.Trim() ?? "", Domain = _domain.Text?.Trim() ?? "", Identity = _key.Text?.Trim() ?? "", Clipboard = _clipboard.IsChecked == true, MultiMonitor = _multi.IsChecked == true, BaudRate = (int)(_baud.Value ?? 0), DataBits = (int)(_bits.Value ?? 0), StopBits = (int)(_stop.Value ?? 0), Parity = _parity.SelectedItem?.ToString() ?? "", FlowControl = _flow.SelectedItem?.ToString() ?? "", FolderPath = ReadFolderPath(), JumpHost = _jump.Text?.Trim() ?? "", RdpShareEnabled = _share.IsChecked == true, RdpSharePath = _sharePath.Text?.Trim() ?? "" };
     internal void VerifyProtocolPortEditing()
     {
         _editing = new Connection(); _protocol.SelectedIndex = 0; _port.Value = 22;
@@ -217,12 +223,13 @@ public sealed partial class MainWindow : Window
     {
         try {
             if (!_storeLoaded) throw new IOException("Fichier existant non chargé : import bloqué pour préserver vos données. Corrigez-le puis relancez l’application.");
-            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Importer mRemoteNG XML sans secrets", AllowMultiple = false });
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Importer mRemoteNG XML", AllowMultiple = false });
             if (files.Count == 0) return;
-            var result = await Task.Run(() => { var items = Connections.Import(files[0].TryGetLocalPath() ?? throw new IOException("Fichier local requis."), out int ignored); return (Items: items, Ignored: ignored); });
+            var keys = await AskImportKeys(); if (keys == null) return;
+            var result = await Task.Run(() => { var items = Connections.Import(files[0].TryGetLocalPath() ?? throw new IOException("Fichier local requis."), out int ignored, keys.Source, keys.Local); return (Items: items, Ignored: ignored); });
             var imported = result.Items;
             Connections.Save(_connections.Concat(imported)); foreach (var c in imported) _connections.Add(c);
-            Filter(); _status.Text = $"{imported.Count} connexions importées ; {result.Ignored} protocoles non pris en charge ignorés. Héritage résolu ; secrets et options Windows exclus. Vérifiez les valeurs avant connexion.";
+            Filter(); _status.Text = $"{imported.Count} connexions importées ; {result.Ignored} protocoles non pris en charge ignorés. Héritage résolu ; secrets réencryptés si demandés. Certaines options Windows restent non prises en charge. Vérifiez les valeurs avant connexion.";
         } catch (Exception ex) { _status.Text = "Import annulé, connexions existantes conservées : " + ex.Message; }
     }
 }
