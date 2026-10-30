@@ -1,20 +1,13 @@
-# MGRemote Linux 0.1.2 — prototype
+# MGRemote Linux Desktop 0.2.0 — work in progress
 
-Independent Avalonia/.NET 10 Linux x86-64 application. Windows sources and installer are unchanged.
+This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
-Download the AppImage, then run `chmod +x MGRemote-Linux-0.1.2-x86_64.AppImage` and `./MGRemote-Linux-0.1.2-x86_64.AppImage`.
-An X11 desktop (including XWayland), the distribution's Avalonia/.NET native dependencies, OpenSSH client, FreeRDP and gnome-terminal, konsole, xfce4-terminal or xterm are required. The .NET runtime is bundled; SSH, FreeRDP and desktop libraries are not. FUSE may be required; alternatively use `./MGRemote-Linux-0.1.2-x86_64.AppImage --appimage-extract-and-run`.
+Implemented here: connection/folder tree preserving XML container paths; configuration below the tree; resizable panes; File/Sessions/View/Tools/Help menus; closeable session tabs. SSH, SFTP command-line, serial and the FreeRDP parent-window path use embedded X11 clients. Xterm provides a real PTY, ANSI terminal and Ctrl+Shift+C/V clipboard bindings. Switching tabs keeps their native hosts mounted. Closing a tab terminates its owned client tree. SSH host-key checks, NLA and certificate verification remain enabled; no passwords are stored or passed as command-line arguments.
 
-Create a connection, select SSH/RDP and save. Sessions open in separate native Linux windows. SSH authentication and clipboard are handled by the Linux terminal; private keys are optional and must use OpenSSH/PEM format with private permissions. SFTP opens an interactive native client (`put`, `get`, recursive directory transfer according to the installed client). No passwords are stored or passed as process arguments. RDP keeps NLA and certificate validation, supports optional text clipboard and multiple monitors; drive sharing is not enabled.
+Dependencies: Linux X11/XWayland, Avalonia native libraries, xterm, OpenSSH, FreeRDP and picocom for serial. The .NET runtime is bundled. Native Wayland is not supported by the embedding layer. Multimonitor RDP still requires the explicit external-window action.
 
-Import accepts SSH2/RDP metadata in non-fully-encrypted mRemoteNG XML. Protocol, port, username and domain inheritance is resolved from parent folders. Passwords and Windows keys/options are not migrated; verify each imported connection. Connection metadata is stored in the Linux local application-data folder under `MGRemoteLinux/connections.json`. Existing OpenSSH config aliases may define ProxyJump and identities. There is no Windows vault conversion or integrated tunnel editor yet.
+Incomplete parity: embedded VNC, graphical SFTP/file transfer and RDP drive sharing, advanced RDP gateway/monitor options, interactive bastion management, encrypted XML/vault migration and optional AnyDesk integration. Some platform-specific Windows behavior will require native Linux equivalents rather than Windows DLLs.
 
-Build with .NET 10 and PowerShell 7: `pwsh ./Build-AppImage.ps1 -SquashfsTool /usr/bin/mksquashfs`. The script pins and verifies the official AppImage runtime hash; output includes an AppImage, corresponding source ZIP and SHA-256 manifest. Under Windows a trusted MSYS2 mksquashfs and its DLLs can be supplied instead. `dotnet run --project MGRemote.Linux.csproj -- --self-test` runs synthetic offline checks without loading saved user data.
+Validation: synthetic import/argument/security checks and Ubuntu/Xvfb tests with two actual embedded X11 terminal processes. The tests exercise tab switching, native child-window creation and shutdown; picocom is also tested with pseudo-terminals. Real server authentication, FreeRDP embedding against a real server, physical serial adapters, monitor hot-plug and production desktops remain unverified. See the workflow for the exact tested commit.
 
-This prototype is unsigned. Published packages are built and exercised on Ubuntu 24.04 x86-64 with Xvfb; the release manifest records the exact validation environment. Packaged self-tests, GUI rendering and picocom pseudo-terminal checks do not establish physical serial compatibility, FUSE mounting, other distribution support or live RDP/SSH functionality. No parity with the Windows edition is claimed.
-
-## Serial consoles and stability changes
-
-Select Serial, set /dev/ttyUSB0 or a /dev/serial/by-id/ path, and configure baud rate, data bits, parity, stop bits and flow control. Install picocom using your distribution package manager. The app never changes device permissions or runs sudo. Exit picocom with Ctrl+A then Ctrl+X. Default is 9600 baud, 8N1, no flow control. Hardware settings must match the switch.
-
-The editor provides search and fixed action buttons. Failed connection-file loads block saving/importing until the file is repaired and the application restarted. Import reports unsupported protocol counts and rejects fully encrypted XML explicitly. CI checks serial input/output and shutdown with pseudo-terminals; physical adapters and switches still require a pilot.
+Build: .NET 10, PowerShell 7 and squashfs-tools are required. Run `pwsh ./Linux/Build-AppImage.ps1 -SquashfsTool /usr/bin/mksquashfs` from the repository root. AppImage/source hashes and dependency notices are included. Development packages are unsigned.

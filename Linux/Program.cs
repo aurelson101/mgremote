@@ -180,7 +180,7 @@ public sealed partial class MainWindow : Window
         try {
             if (!_storeLoaded) throw new IOException("Fichier existant non chargé : corrigez-le puis relancez MGRemote. Enregistrement bloqué pour préserver vos données.");
             var item = Read(); Connections.Validate(item);
-            var next = _connections.ToList(); int index = _editing == null ? -1 : next.IndexOf(_editing);
+            var next = _connections.ToList(); int index = _editing == null ? -1 : next.FindIndex(c => ReferenceEquals(c, _editing));
             if (index < 0) next.Add(item); else next[index] = item;
             Connections.Save(next); _connections.Clear(); foreach (var c in next) _connections.Add(c);
             Filter(); if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); _status.Text = "Connexion enregistrée sans mot de passe.";
