@@ -16,6 +16,9 @@ public sealed record Connection
     public string User { get; set; } = "";
     public string Domain { get; set; } = "";
     public string Identity { get; set; } = "";
+    public string JumpHost { get; set; } = "";
+    public bool RdpShareEnabled { get; set; }
+    public string RdpSharePath { get; set; } = "";
     public bool Clipboard { get; set; }
     public bool MultiMonitor { get; set; }
     public int BaudRate { get; set; } = 9600;
@@ -72,7 +75,7 @@ public static class Connections
     }
     public static void Validate(Connection c)
     {
-        if (c == null || c.Host == null || c.User == null || c.Domain == null || c.Identity == null) throw new ArgumentException("Connexion incomplète : hôte, utilisateur, domaine ou clé manquant dans les données.");
+        if (c == null || c.Host == null || c.User == null || c.Domain == null || c.Identity == null || c.JumpHost == null || c.RdpSharePath == null) throw new ArgumentException("Connexion incomplète : hôte, utilisateur, domaine ou clé manquant dans les données.");
         if (string.IsNullOrWhiteSpace(c.Name) || c.Name.Length > 256 || c.Name.Any(char.IsControl)) throw new ArgumentException("Nom invalide.");
         if (c.FolderPath == null || c.FolderPath.Length > 128 || c.FolderPath.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 256 || p.Any(char.IsControl))) throw new ArgumentException("Dossier de connexion invalide.");
         if (c.Protocol == "Serial") {
@@ -87,6 +90,11 @@ public static class Connections
         foreach (string text in new[] { c.User, c.Domain })
             if (text.Length > 256 || text.Any(char.IsControl) || text.StartsWith('-')) throw new ArgumentException("Utilisateur ou domaine invalide.");
         if (c.Identity.IndexOfAny(['\r', '\n', '\0']) >= 0) throw new ArgumentException("Chemin de clé invalide.");
+        if (c.Protocol == "SSH" && c.JumpHost.Length > 0 && (!Regex.IsMatch(c.JumpHost, @"\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,252}\z") ||
+            c.JumpHost.Equals("none", StringComparison.OrdinalIgnoreCase) || c.JumpHost.Equals(c.Host, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("Bastion invalide : choisissez un alias OpenSSH distinct de la destination, sans options de commande.");
+        if (c.Protocol == "RDP" && c.RdpShareEnabled && (string.IsNullOrWhiteSpace(c.RdpSharePath) || !Path.IsPathFullyQualified(c.RdpSharePath) ||
+            c.RdpSharePath.Any(char.IsControl) || c.RdpSharePath.Contains(','))) throw new ArgumentException("Choisissez un dossier RDP local absolu, sans virgule ni caractères de contrôle.");
     }
     public static string DataPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MGRemoteLinux", "connections.json");
     public static List<Connection> Load()
@@ -132,12 +140,14 @@ public static class SessionLauncher
             if (c.Domain.Length > 0) rdp.Add("/d:" + c.Domain);
             rdp.Add(c.Clipboard ? "+clipboard" : "-clipboard");
             if (c.MultiMonitor) rdp.Add("/multimon");
+            if (c.RdpShareEnabled) rdp.Add("/drive:MGRemote," + Path.GetFullPath(c.RdpSharePath));
             return rdp; // Certificate verification is retained; no password or redirected drives.
         }
         var ssh = new List<string> { "-o", "StrictHostKeyChecking=ask", "-o", "ForwardAgent=no", "-o", "PermitLocalCommand=no" };
         if (!sftp) ssh.Add("-tt");
         ssh.Add(sftp ? "-P" : "-p"); ssh.Add(c.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (c.Identity.Length > 0) { ssh.AddRange(["-i", c.Identity, "-o", "IdentitiesOnly=yes"]); }
+        if (c.JumpHost.Length > 0) ssh.AddRange(["-J", c.JumpHost]);
         if (c.User.Length > 0) ssh.AddRange(["-o", "User=" + c.User]);
         string destination = c.Host;
         if (sftp && destination.Contains(':') && !destination.StartsWith('[')) destination = "[" + destination + "]";
@@ -170,6 +180,8 @@ public static class SessionLauncher
     {
         Connections.Validate(c);
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Les sessions intégrées nécessitent Linux X11/XWayland.");
+        if (c.Protocol == "RDP" && c.RdpShareEnabled && (!Directory.Exists(c.RdpSharePath) || new DirectoryInfo(c.RdpSharePath).LinkTarget != null))
+            throw new IOException("Le dossier à partager en RDP doit exister et ne pas être un lien symbolique.");
         if (c.Identity.Length > 0 && c.Protocol == "SSH") {
             if (!Path.IsPathFullyQualified(c.Identity) || !File.Exists(c.Identity) || new FileInfo(c.Identity).LinkTarget != null) throw new IOException("Choisissez une clé privée locale Linux existante.");
             if ((File.GetUnixFileMode(c.Identity) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)

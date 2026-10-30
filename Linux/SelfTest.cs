@@ -10,6 +10,11 @@ internal static class SelfTest
         var args = SessionLauncher.Arguments(ssh);
         Check(args.Contains("-tt") && args.Contains("StrictHostKeyChecking=ask") && args.Contains(ssh.Identity));
         Check(!args.Contains("sh") && !args.Contains("-c"));
+        var jumped = ssh with { JumpHost = "bastion-profile" };
+        var jumpedArgs = SessionLauncher.Arguments(jumped);
+        Check(jumpedArgs.Contains("-J") && jumpedArgs[jumpedArgs.IndexOf("-J") + 1] == "bastion-profile");
+        Check(FileTransfer.Arguments(jumped, Path.Combine(Path.GetTempPath(), "jump-fixture"), "/remote/file", false, false).Contains("bastion-profile"));
+        foreach (string badJump in new[] { "-oProxyCommand=command", "jump host", "jump\nother", "server.example", "none" }) Reject(() => Connections.Validate(ssh with { JumpHost = badJump }));
         Check(SessionLauncher.Arguments(ssh, true).Contains("-P"));
         foreach (string bad in new[] { "-oProxyCommand=evil", "host;touch /tmp/bad", "server\nother", "" }) Reject(() => Connections.Validate(ssh with { Host = bad }));
         Reject(() => Connections.Validate(ssh with { Port = 0 }));
@@ -45,6 +50,11 @@ internal static class SelfTest
         var rdp = SessionLauncher.Arguments(new Connection { Host = "2001:db8::1", Protocol = "RDP", Port = 3389, Clipboard = true, MultiMonitor = true });
         Check(rdp.Contains("/v:[2001:db8::1]:3389") && rdp.Contains("/sec:nla") && rdp.Contains("+clipboard") && rdp.Contains("/multimon"));
         Check(!rdp.Any(s => s.StartsWith("/p:") || s.Contains("ignore") || s.StartsWith("/drive:")));
+        string share = Path.Combine(Path.GetTempPath(), "rdp shared folder");
+        var rdpShare = new Connection { Protocol = "RDP", Host = "rdp.example.invalid", Port = 3389, RdpShareEnabled = true, RdpSharePath = share };
+        Check(SessionLauncher.Arguments(rdpShare).Contains("/drive:MGRemote," + share));
+        Check(!SessionLauncher.Arguments(rdpShare with { RdpShareEnabled = false }).Any(a => a.StartsWith("/drive:")));
+        foreach (string badShare in new[] { "relative/path", share + ",extra", share + "\nother" }) Reject(() => Connections.Validate(rdpShare with { RdpSharePath = badShare }));
         string path = Path.Combine(Path.GetTempPath(), "mgremote-linux-test-" + Guid.NewGuid().ToString("N") + ".xml");
         try {
             File.WriteAllText(path, "<Connections><Node Type='Connection' Name='Linux' Protocol='SSH2' Hostname='server' Username='alice' Port='2222' Password='DO-NOT-IMPORT' SSHOptions='-i windows-key'/></Connections>");

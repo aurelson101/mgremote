@@ -1,6 +1,6 @@
 # Build an isolated AppImage; does not install software or alter the Windows fork.
 [CmdletBinding()]
-param([string]$SquashfsTool, [string]$Version = '0.2.1')
+param([string]$SquashfsTool, [string]$Version = '0.2.2')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid version.' }
 $root = Split-Path $PSScriptRoot -Parent

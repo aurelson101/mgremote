@@ -7,7 +7,7 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 | Platform | Current package | Status |
 | --- | --- | --- |
 | Windows x64 | [MSI 0.1.15](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.15) | Unsigned preview |
-| Linux x86-64 | [AppImage 0.1.2](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.1.2) | Unsigned prototype; separate session windows |
+| Linux x86-64 | [AppImage 0.2.2](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.2.2) | Unsigned development preview; embedded X11 sessions, incomplete Windows parity |
 
 Download the installer or AppImage from the matching release. SHA-256 manifests and corresponding source archives accompany the packages. The editions have independent version numbers and are not feature-equivalent.
 

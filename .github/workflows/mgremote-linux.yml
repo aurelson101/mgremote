@@ -27,14 +27,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image=$(find artifacts/linux/0.2.1 -type f -name '*.AppImage' -print -quit)
+          image=$(find artifacts/linux/0.2.2 -type f -name '*.AppImage' -print -quit)
           export APPIMAGE_EXTRACT_AND_RUN=1
           "$image" --self-test
           xvfb-run -a "$image" --smoke-ui="$GITHUB_WORKSPACE/artifacts/linux-gui.png"
           python3 Linux/Test-Serial.py "$image"
           python3 - <<'PY'
           import json,pathlib,hashlib
-          folder=next(pathlib.Path('artifacts/linux/0.2.1').iterdir())
+          folder=next(pathlib.Path('artifacts/linux/0.2.2').iterdir())
           path=folder/'manifest.json'
           data=json.loads(path.read_text(encoding='utf-8-sig'))
           image=folder/data['AppImage']
@@ -50,8 +50,8 @@ jobs:
         with:
           name: mgremote-linux-validated
           path: |
-            artifacts/linux/0.2.1/*/*.AppImage
-            artifacts/linux/0.2.1/*/*-source.zip
-            artifacts/linux/0.2.1/*/manifest.json
+            artifacts/linux/0.2.2/*/*.AppImage
+            artifacts/linux/0.2.2/*/*-source.zip
+            artifacts/linux/0.2.2/*/manifest.json
             artifacts/linux-gui.png
           if-no-files-found: error

@@ -5,6 +5,24 @@ using System.Text.Json;
 namespace MGRemote.Linux;
 public sealed partial class MainWindow
 {
+    private string[] ReadFolderPath()
+    {
+        string text = _folder.Text ?? "";
+        return text == string.Join(" > ", _selectedFolder) ? _selectedFolder.ToArray() : text.Split(" > ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    }
+    private void Duplicate()
+    {
+        if (_editing == null) { _status.Text = "Sélectionnez une connexion à dupliquer."; return; }
+        var source = _editing; Edit(source); _editing = null; _list.SelectedItem = null;
+        _name.Text = source.Name + " (copie)"; _name.Focus(); _status.Text = "Copie prête ; cliquez sur Enregistrer pour l’ajouter.";
+    }
+    private async Task ChooseRdpFolder()
+    {
+        try {
+            var folders = await StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions { Title = "Dossier local à partager avec le serveur RDP", AllowMultiple = false });
+            if (folders.Count > 0) _sharePath.Text = Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(folders[0]);
+        } catch (Exception ex) { _status.Text = ex.Message; }
+    }
     private void RebuildTree()
     {
         string query = _search.Text?.Trim() ?? "";
