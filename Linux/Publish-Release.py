@@ -36,7 +36,7 @@ source_run = api('/actions/runs/' + run_id)
 assert source_run['head_repository']['full_name'] == repo and source_run['head_branch'] == 'linux-desktop-parity' and source_run['event'] == 'workflow_dispatch', 'Artifact must come from the trusted development branch'
 commit = source_run['head_sha']
 for attempt in range(15):
-    jobs = api('/actions/runs/' + run_id + '/jobs?filter=all&per_page=100')['jobs']
+    jobs = api('/actions/runs/' + run_id + '/jobs')['jobs']
     if any(j['name'] == 'linux' and j['conclusion'] == 'success' for j in jobs): break
     time.sleep(2)
 else: raise RuntimeError('Validation job must pass first')
