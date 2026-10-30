@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AcceptEula>wix7</AcceptEula>
     <OutputType>Package</OutputType>
-    <MGRemoteVersion Condition="'$(MGRemoteVersion)' == ''">0.1.13</MGRemoteVersion>
+    <MGRemoteVersion Condition="'$(MGRemoteVersion)' == ''">0.1.14</MGRemoteVersion>
     <Platform Condition="'$(Platform)' == ''">x64</Platform>
     <OutputName>MGRemote-$(MGRemoteVersion)-win-$(Platform)-preview</OutputName>
     <OutputPath>..\artifacts\installers\</OutputPath>

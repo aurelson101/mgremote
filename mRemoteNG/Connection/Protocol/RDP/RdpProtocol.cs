@@ -142,8 +142,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
             try
             {
-                mRemoteNG.Security.WindowsSecurityPolicy.ValidateRdp(
-                    (int)connectionInfo.RDPAuthenticationLevel, connectionInfo.UseCredSsp);
                 if (!InitializeActiveXControl()) return false;
 
                 RdpVersion = new Version(_rdpClient.Version);
@@ -151,6 +149,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 if (RdpVersion < Versions.RDC61) return false; // only RDP versions 6.1 and greater are supported; minimum dll version checked, MSTSCLIB is not capable 
 
                 SetRdpClientProperties();
+                // Validate the enforced session settings, not legacy imported preferences.
+                mRemoteNG.Security.WindowsSecurityPolicy.ValidateRdp(
+                    (int)_rdpClient.AdvancedSettings5.AuthenticationLevel,
+                    _rdpClient.AdvancedSettings7.EnableCredSspSupport);
 
                 return true;
             }
@@ -379,7 +381,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
             if (RdpVersion >= Versions.RDC61)
             {
-                _rdpClient.AdvancedSettings7.EnableCredSspSupport = connectionInfo.UseCredSsp;
+                _rdpClient.AdvancedSettings7.EnableCredSspSupport = true;
             }
             
             SetUseConsoleSession();

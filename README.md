@@ -6,7 +6,7 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 
 | Platform | Current package | Status |
 | --- | --- | --- |
-| Windows x64 | [MSI 0.1.13](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.13) | Unsigned preview |
+| Windows x64 | [MSI 0.1.14](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.14) | Unsigned preview |
 | Linux x86-64 | [AppImage 0.1.1](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.1.1) | Unsigned prototype; separate session windows |
 
 Download the installer or AppImage from the matching release. SHA-256 manifests and corresponding source archives accompany the packages. The editions have independent version numbers and are not feature-equivalent.
@@ -18,6 +18,7 @@ Download the installer or AppImage from the matching release. SHA-256 manifests 
 - Optional OpenSSH/PEM private keys, native interactive passphrase/password prompts, OpenSSH profiles and managed SSH bastion tunnels.
 - SSH copy/paste with Ctrl+Shift+C / Ctrl+Shift+V or the context menu. Multiline paste requires confirmation; Ctrl+C remains an interrupt.
 - Bidirectional file/folder transfer through the dedicated SFTP transfer window. Files are not pasted into the remote shell as commands.
+- Legacy imported RDP preferences are securely overridden for the session: server authentication and CredSSP/NLA remain required, without rewriting the saved profile.
 - Explicit RDP clipboard and selected-drive sharing controls, plus monitor and window-placement recovery. Sharing changes require reconnection; server policies may restrict them.
 - mRemoteNG XML import, optional external AnyDesk integration and Windows MSI maintenance/upgrade support.
 
@@ -26,8 +27,8 @@ Install the MSI normally. Windows OpenSSH Client and the Microsoft Edge WebView2
 Silent installation and removal use standard Windows Installer commands:
 
 ```powershell
-msiexec /i "MGRemote-0.1.13-win-x64-preview.msi" /qn /norestart
-msiexec /x "MGRemote-0.1.13-win-x64-preview.msi" /qn /norestart
+msiexec /i "MGRemote-0.1.14-win-x64-preview.msi" /qn /norestart
+msiexec /x "MGRemote-0.1.14-win-x64-preview.msi" /qn /norestart
 ```
 
 Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly requests cleanup of app-owned data for the current interactive user. It does not erase operating-system or antivirus records, other users' profiles, documents or personal SSH keys. See [Windows implementation notes](MGREMOTE-WINDOWS.md).
