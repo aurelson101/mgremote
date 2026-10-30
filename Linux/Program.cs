@@ -55,7 +55,7 @@ public sealed partial class MainWindow : Window
     private readonly Grid _sessionArea = new();
     private readonly Dictionary<Connection, TreeViewItem> _nodes = new(ReferenceEqualityComparer.Instance);
     private string[] _selectedFolder = [];
-    private sealed record SessionTab(string Name, Control Body, EmbeddedSession? Host = null);
+    private sealed record SessionTab(string Name, Control Body, EmbeddedSession? Host = null, bool Closable = true);
     private readonly TextBox _name = new(), _host = new(), _user = new(), _domain = new(), _key = new();
     private readonly NumericUpDown _port = new() { Minimum = 1, Maximum = 65535, Value = 22 };
     private readonly ComboBox _protocol = new() { ItemsSource = new[] { "SSH", "RDP", "Serial" }, SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -71,7 +71,7 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.0"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.1"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = Brush.Parse("#eef1f5"); Foreground = Brush.Parse("#1f2937");
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu();
@@ -119,16 +119,16 @@ public sealed partial class MainWindow : Window
         _tabBar.ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<SessionTab>((tab, _) => {
             var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             header.Children.Add(new TextBlock { Text = tab!.Name, VerticalAlignment = VerticalAlignment.Center });
-            if (tab.Host != null) { var close = new Button { Content = "×", Padding = new Thickness(5, 0) }; close.Click += (_, _) => CloseSession(tab); header.Children.Add(close); }
+            if (tab.Closable) { var close = new Button { Content = "×", Padding = new Thickness(5, 0) }; close.Click += (_, _) => CloseSession(tab); header.Children.Add(close); }
             return header;
         });
         _tabBar.SelectionChanged += (_, _) => { foreach (var tab in _tabs) tab.Body.IsVisible = ReferenceEquals(tab, _tabBar.SelectedItem); };
         sessions.Children.Add(_tabBar); Grid.SetRow(_sessionArea, 1); sessions.Children.Add(_sessionArea);
         Grid.SetColumn(sessions, 2); body.Children.Add(sessions); root.Children.Add(body);
-        var welcome = new Border { Padding = new Thickness(28), Child = new TextBlock { Text = "MGRemote\n\nSélectionnez une connexion pour modifier ses propriétés.\nDouble-cliquez pour ouvrir une session dans un onglet.\n\nSSH / SFTP : clés OpenSSH, vérification de clé d’hôte, Ctrl+Maj+C/V.\nRDP : authentification NLA et vérification du certificat.\nSérie : paramètres du câble console et fermeture avec l’onglet.\n\nLa parité complète avec Windows reste en développement : VNC,\ntransfert graphique, lecteurs RDP et gestion avancée des bastions\nne sont pas encore équivalents. Le multi-écran RDP utilise le mode externe.", FontSize = 16, TextWrapping = TextWrapping.Wrap } };
-        AddSession(new SessionTab("General", welcome));
+        var welcome = new Border { Padding = new Thickness(28), Child = new TextBlock { Text = "MGRemote\n\nSélectionnez une connexion pour modifier ses propriétés.\nDouble-cliquez pour ouvrir une session dans un onglet.\n\nSSH / SFTP : clés OpenSSH, vérification de clé d’hôte, Ctrl+Maj+C/V.\nRDP : authentification NLA et vérification du certificat.\nSérie : paramètres du câble console et fermeture avec l’onglet.\n\nLa parité complète avec Windows reste en développement : VNC,\nlecteurs RDP et gestion avancée des bastions\nne sont pas encore équivalents. Le multi-écran RDP utilise le mode externe.", FontSize = 16, TextWrapping = TextWrapping.Wrap } };
+        AddSession(new SessionTab("General", welcome, null, false));
         Grid.SetRow(_status, 3); _status.Margin = new Thickness(8); root.Children.Add(_status); Content = root;
-        Closed += (_, _) => { foreach (var tab in _tabs.ToArray()) tab.Host?.Dispose(); };
+        Closed += (_, _) => { foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } };
         _protocol.SelectionChanged += (_, _) => {
             UpdateProtocol();
         };

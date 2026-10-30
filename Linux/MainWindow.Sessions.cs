@@ -30,14 +30,15 @@ public sealed partial class MainWindow
     private void AddSession(SessionTab tab) { tab.Body.IsVisible = false; _sessionArea.Children.Add(tab.Body); _tabs.Add(tab); _tabBar.SelectedItem = tab; }
     private void CloseSession(SessionTab? tab)
     {
-        if (tab?.Host == null) return;
-        _sessionArea.Children.Remove(tab.Body); _tabs.Remove(tab); tab.Host.Dispose(); _tabBar.SelectedItem = _tabs.LastOrDefault();
+        if (tab == null || !tab.Closable) return;
+        _sessionArea.Children.Remove(tab.Body); _tabs.Remove(tab); tab.Host?.Dispose(); (tab.Body as IDisposable)?.Dispose(); _tabBar.SelectedItem = _tabs.LastOrDefault();
     }
     private void Launch(bool sftp)
     {
         try {
             var model = Read(); Connections.Validate(model);
             if (sftp && model.Protocol != "SSH") throw new ArgumentException("SFTP nécessite SSH.");
+            if (sftp) { AddSession(new SessionTab("SFTP · " + model.Name, new FileTransferPane(model))); return; }
             if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux X11/XWayland.");
             if (model.Protocol == "RDP" && model.MultiMonitor) throw new NotSupportedException("Le multi-écran utilise encore Sessions → Ouvrir en fenêtre externe.");
             var status = new TextBlock { Text = "Initialisation…", Margin = new Thickness(8), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
@@ -75,7 +76,14 @@ public sealed partial class MainWindow
             if (!second.ProcessRunning || second.ChildWindows == 0 || !first.ProcessRunning) throw new Exception("Switching tabs destroyed a terminal.");
             _tabBar.SelectedItem = a; await Task.Delay(300);
             if (!first.ProcessRunning || !second.ProcessRunning) throw new Exception("Hidden sessions are not retained.");
+            await Task.Delay(800); int resizeRequests = first.ResizeRequests, queries = first.TreeQueries; await Task.Delay(1000);
+            if (first.ResizeRequests != resizeRequests || first.TreeQueries != queries) throw new Exception("An idle terminal repeatedly queries/resizes its X11 children.");
         } finally { CloseSession(b); CloseSession(a); await Task.WhenAll(first.ShutdownCompletion, second.ShutdownCompletion).WaitAsync(TimeSpan.FromSeconds(8)); }
-        Console.WriteLine("PASS: two X11 terminals embed, survive tab switching and close their processes with their tabs.");
+        foreach (int pid in new[] { first.ProcessId, second.ProcessId }) {
+            bool alive; try { using var process = System.Diagnostics.Process.GetProcessById(pid); alive = !process.HasExited; } catch (ArgumentException) { alive = false; }
+            if (alive) throw new Exception("An owned terminal process survived tab closure.");
+        }
+        using var transfer = new FileTransferPane(new Connection { Name = "Fixture", Host = "example.invalid" }); await transfer.VerifyValidation();
+        Console.WriteLine("PASS: embedded tabs, idle resize suppression, real PID cleanup and transfer UI validation.");
     }
 }

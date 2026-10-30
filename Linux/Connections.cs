@@ -143,7 +143,7 @@ public static class SessionLauncher
         if (sftp && destination.Contains(':') && !destination.StartsWith('[')) destination = "[" + destination + "]";
         ssh.Add(destination); return ssh;
     }
-    private static string Find(params string[] names)
+    internal static string Find(params string[] names)
     {
         foreach (string name in names) foreach (string prefix in new[] { "/usr/bin", "/bin" }) {
             string file = Path.Combine(prefix, name);
@@ -166,7 +166,7 @@ public static class SessionLauncher
         foreach (string argument in Arguments(c, sftp)) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException("Impossible de lancer le terminal Linux.");
     }
-    private static void ValidateIdentity(Connection c)
+    internal static void ValidateIdentity(Connection c)
     {
         Connections.Validate(c);
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Les sessions intégrées nécessitent Linux X11/XWayland.");

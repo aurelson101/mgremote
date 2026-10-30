@@ -18,8 +18,14 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
     private Process? _process;
     private bool _disposed;
     private bool _nativeOwned;
+    private readonly Dictionary<uint, (uint Width, uint Height)> _configured = [];
+    private bool _layoutDirty = true, _childrenDirty = true;
+    private DateTime _probeUntil;
+    private int _processId;
+    public int ResizeRequests { get; private set; }
+    public int TreeQueries { get; private set; }
     public int ChildWindows { get; private set; }
-    public int ProcessId => _process?.Id ?? 0;
+    public int ProcessId => _processId;
     public bool ProcessRunning => !_disposed && _process != null && !_process.HasExited;
     public Task ShutdownCompletion { get; private set; } = Task.CompletedTask;
     public EmbeddedSession(Func<uint, ProcessStartInfo> start, Action<string> notify)
@@ -28,10 +34,12 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
         _resize.Tick += (_, _) => ResizeChildren();
         PointerPressed += (_, _) => FocusNative();
         SizeChanged += (_, _) => ResizeChildren();
+        GotFocus += (_, _) => FocusNative();
     }
     protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
     {
-        if (!OperatingSystem.IsLinux() || parent.HandleDescriptor is not ("XID" or "X11")) {
+        if (_disposed || !OperatingSystem.IsLinux() || parent.HandleDescriptor is not ("XID" or "X11")) {
+            _nativeOwned = false;
             _notify("Les sessions intégrées de cette version nécessitent Linux X11/XWayland.");
             return base.CreateNativeControlCore(parent);
         }
@@ -40,11 +48,12 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
             if (_connection == IntPtr.Zero || xcb_connection_has_error(_connection) != 0) throw new IOException("Connexion X11 indisponible.");
             _window = xcb_generate_id(_connection);
             _nativeOwned = true;
-            xcb_create_window(_connection, 0, _window, (uint)parent.Handle.ToInt64(), 0, 0, 1, 1, 0, 1, 0, 2, new uint[] { 0x181a1f });
+            xcb_create_window(_connection, 0, _window, (uint)parent.Handle.ToInt64(), 0, 0, 1, 1, 0, 1, 0, 2 | 2048, new uint[] { 0x181a1f, (1u << 17) | (1u << 19) });
             xcb_map_window(_connection, _window); xcb_flush(_connection);
             _process = new Process { StartInfo = _start(_window), EnableRaisingEvents = true };
             _process.Exited += ProcessExited;
             if (!_process.Start()) throw new IOException("Impossible de lancer la session intégrée.");
+            _processId = _process.Id; _probeUntil = DateTime.UtcNow.AddSeconds(10);
             _resize.Start(); _notify("Session intégrée ouverte. Ctrl+Maj+C/V : copier/coller dans le terminal.");
             return new PlatformHandle((IntPtr)_window, parent.HandleDescriptor);
         } catch (Exception ex) {
@@ -53,11 +62,12 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
         }
     }
     private void ProcessExited(object? sender, EventArgs e) => Dispatcher.UIThread.Post(() => {
-        if (!_disposed) _notify("Session terminée. Fermez l’onglet ou reconnectez-vous ; vérifiez les messages du terminal si la connexion a échoué.");
+        if (!_disposed) { _resize.Stop(); _notify("Session terminée. Fermez l’onglet ou reconnectez-vous ; vérifiez les messages du terminal si la connexion a échoué."); }
     });
     private uint[] Children()
     {
         if (_connection == IntPtr.Zero || _window == 0) return [];
+        TreeQueries++;
         IntPtr reply = xcb_query_tree_reply(_connection, xcb_query_tree(_connection, _window), out IntPtr error);
         try {
             if (reply == IntPtr.Zero || error != IntPtr.Zero) return [];
@@ -70,18 +80,39 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
     }
     private void ResizeChildren()
     {
-        if (_disposed || _connection == IntPtr.Zero || !IsEffectivelyVisible) return;
+        if (_disposed || _connection == IntPtr.Zero) return;
+        IntPtr pending;
+        while ((pending = xcb_poll_for_event(_connection)) != IntPtr.Zero) {
+            try {
+                int type = Marshal.ReadByte(pending) & 127;
+                if (type is 16 or 17 or 18 or 19 or 21) _childrenDirty = true;
+                if (type == 22) {
+                    uint child = unchecked((uint)Marshal.ReadInt32(pending, 8));
+                    if (child == _window) _layoutDirty = true;
+                    else if (_configured.TryGetValue(child, out var size) &&
+                        (unchecked((ushort)Marshal.ReadInt16(pending, 20)) != size.Width || unchecked((ushort)Marshal.ReadInt16(pending, 22)) != size.Height)) {
+                        _configured.Remove(child); _childrenDirty = true;
+                    }
+                }
+            } finally { free(pending); }
+        }
+        if (!IsEffectivelyVisible) return;
         double scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
         uint width = (uint)Math.Clamp(Bounds.Width * scale, 1, 32767), height = (uint)Math.Clamp(Bounds.Height * scale, 1, 32767);
+        if (!_layoutDirty && !_childrenDirty && (ChildWindows != 0 || DateTime.UtcNow >= _probeUntil) && _configured.Values.All(s => s.Width == width && s.Height == height)) return;
         var children = Children(); ChildWindows = children.Length;
-        foreach (uint child in children) xcb_configure_window(_connection, child, 4 | 8, new[] { width, height });
-        // Unchecked XCB requests cannot terminate the process on a disappearing child.
-        IntPtr pending; while ((pending = xcb_poll_for_event(_connection)) != IntPtr.Zero) free(pending);
+        foreach (uint child in children) {
+            if (_configured.TryGetValue(child, out var size) && size == (width, height)) continue;
+            xcb_configure_window(_connection, child, 4 | 8, new[] { width, height });
+            _configured[child] = (width, height); ResizeRequests++;
+        }
+        foreach (uint old in _configured.Keys.Where(k => !children.Contains(k)).ToArray()) _configured.Remove(old);
+        _layoutDirty = _childrenDirty = false;
         xcb_flush(_connection);
     }
     private void FocusNative()
     {
-        if (_disposed || _connection == IntPtr.Zero) return;
+        if (_disposed || _connection == IntPtr.Zero || !IsEffectivelyVisible) return;
         var child = Children().LastOrDefault();
         if (child != 0) { xcb_set_input_focus(_connection, 2, child, 0); xcb_flush(_connection); }
     }
@@ -93,6 +124,7 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
     public void Dispose()
     {
         if (_disposed) return; _disposed = true; _resize.Stop();
+        _configured.Clear();
         var process = _process;
         if (process != null) {
             process.Exited -= ProcessExited;

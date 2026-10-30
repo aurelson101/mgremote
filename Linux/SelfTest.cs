@@ -14,6 +14,25 @@ internal static class SelfTest
         foreach (string bad in new[] { "-oProxyCommand=evil", "host;touch /tmp/bad", "server\nother", "" }) Reject(() => Connections.Validate(ssh with { Host = bad }));
         Reject(() => Connections.Validate(ssh with { Port = 0 }));
         Reject(() => Connections.Validate(ssh with { User = "alice\ncmd" }));
+        string localTransfer = Path.Combine(Path.GetTempPath(), "mgremote transfer fixture");
+        var uploadArgs = FileTransfer.Arguments(ssh, localTransfer, "/remote path/file", false, false);
+        Check(uploadArgs.Contains(ssh.Identity) && uploadArgs.Contains("StrictHostKeyChecking=ask") && uploadArgs[^1] == "server.example:/remote path/file");
+        Check(!uploadArgs.Contains("-O") && !uploadArgs.Contains("-T") && uploadArgs.Contains("--"));
+        var downloadArgs = FileTransfer.Arguments(ssh with { Host = "2001:db8::1" }, localTransfer, "/remote folder", true, true);
+        Check(downloadArgs.Contains("-r") && downloadArgs[^2] == "[2001:db8::1]:/remote folder" && downloadArgs[^1] == localTransfer);
+        foreach (string bad in new[] { "relative/path", "/remote/*", "/bad\npath" }) Reject(() => FileTransfer.Arguments(ssh, localTransfer, bad, false, false));
+        Reject(() => FileTransfer.Arguments(ssh, "relative", "/remote/file", false, false));
+        string fixture = Path.Combine(Path.GetTempPath(), "mgremote-transfer-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(fixture);
+        try {
+            File.WriteAllText(Path.Combine(fixture, "fixture.txt"), "synthetic");
+            FileTransfer.ValidateUpload(fixture, true); Check(true);
+            Reject(() => FileTransfer.ValidateUpload(fixture, false));
+            if (OperatingSystem.IsLinux()) {
+                File.CreateSymbolicLink(Path.Combine(fixture, "link"), Path.Combine(fixture, "fixture.txt"));
+                bool blocked = false; try { FileTransfer.ValidateUpload(fixture, true); } catch (IOException) { blocked = true; } Check(blocked);
+                File.Delete(Path.Combine(fixture, "link"));
+            }
+        } finally { File.Delete(Path.Combine(fixture, "fixture.txt")); Directory.Delete(fixture); }
         Reject(() => Connections.Validate(ssh with { Host = null! }));
         var serial = new Connection { Protocol = "Serial", Host = "/dev/ttyUSB0", BaudRate = 9600, DataBits = 8, Parity = "none", StopBits = 1, FlowControl = "none" };
         var serialArgs = SessionLauncher.Arguments(serial);
