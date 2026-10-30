@@ -34,12 +34,14 @@ def api(path, method='GET', body=None, raw=False):
 assert run_id.isdigit()
 source_run = api('/actions/runs/' + run_id)
 assert source_run['head_repository']['full_name'] == repo and source_run['head_branch'] == 'linux-desktop-parity' and source_run['event'] == 'workflow_dispatch', 'Artifact must come from the trusted development branch'
+assert source_run['path'].split('@')[0] == '.github/workflows/mgremote-linux.yml', 'Unexpected validation workflow'
 commit = source_run['head_sha']
-for attempt in range(15):
-    jobs = api('/actions/runs/' + run_id + '/jobs')['jobs']
-    if any(j['name'] == 'linux' and j['conclusion'] == 'success' for j in jobs): break
-    time.sleep(2)
-else: raise RuntimeError('Validation job must pass first')
+if source_run.get('conclusion') != 'success':
+    for attempt in range(15):
+        jobs = api('/actions/runs/' + run_id + '/jobs')['jobs']
+        if any(j['name'] == 'linux' and j['conclusion'] == 'success' for j in jobs): break
+        time.sleep(2)
+    else: raise RuntimeError('Validation job must pass first')
 artifact = next(a for a in api('/actions/runs/' + run_id + '/artifacts')['artifacts'] if a['name'] == 'mgremote-linux-validated')
 assert not artifact['expired']
 destination = pathlib.Path('validated-release')
