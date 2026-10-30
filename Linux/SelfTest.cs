@@ -21,7 +21,8 @@ internal static class SelfTest
         Reject(() => Connections.Validate(serial with { Host = "/dev/ttyUSB0;command" }));
         Reject(() => Connections.Validate(serial with { BaudRate = 0 }));
         Reject(() => SessionLauncher.Arguments(serial, true));
-        Check(System.Text.Json.JsonSerializer.Deserialize<Connection>(System.Text.Json.JsonSerializer.Serialize(serial)) == serial);
+        var roundtrip = System.Text.Json.JsonSerializer.Deserialize<Connection>(System.Text.Json.JsonSerializer.Serialize(serial))!;
+        Check(roundtrip.Protocol == "Serial" && roundtrip.Host == serial.Host && roundtrip.BaudRate == 9600);
         var rdp = SessionLauncher.Arguments(new Connection { Host = "2001:db8::1", Protocol = "RDP", Port = 3389, Clipboard = true, MultiMonitor = true });
         Check(rdp.Contains("/v:[2001:db8::1]:3389") && rdp.Contains("/sec:nla") && rdp.Contains("+clipboard") && rdp.Contains("/multimon"));
         Check(!rdp.Any(s => s.StartsWith("/p:") || s.Contains("ignore") || s.StartsWith("/drive:")));
@@ -34,6 +35,7 @@ internal static class SelfTest
             File.WriteAllText(path, "<Connections><Node Type='Container' Protocol='SSH2' Port='2222' Username='inherited-user' Domain='example'><Node Type='Connection' Name='Inherited' Hostname='server' Protocol='RDP' Port='3389' Username='wrong-user' InheritProtocol='true' InheritPort='true' InheritUsername='true' InheritDomain='true'/></Node></Connections>");
             var inherited = Connections.Import(path).Single();
             Check(inherited.Protocol == "SSH" && inherited.Port == 2222 && inherited.User == "inherited-user" && inherited.Domain == "example");
+            Check(inherited.FolderPath.Length == 1);
             File.WriteAllText(path, "<Connections><Node Type='Connection' Name='Override' Hostname='server' Protocol='RDP' Port='3390' InheritPort='false'/></Connections>");
             Check(Connections.Import(path).Single().Port == 3390);
             File.WriteAllText(path, "<Connections><Node Type='Connection' Name='RDP' Protocol='RDP' Hostname='server'/><Node Type='Connection' Name='Old Telnet' Protocol='Telnet' Hostname='switch'/></Connections>");

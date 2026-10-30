@@ -23,6 +23,7 @@ public sealed record Connection
     public string Parity { get; set; } = "none";
     public int StopBits { get; set; } = 1;
     public string FlowControl { get; set; } = "none";
+    public string[] FolderPath { get; set; } = [];
     public override string ToString() => $"{Name}  ·  {Protocol}";
 }
 
@@ -60,7 +61,8 @@ public static class Connections
             var connection = new Connection {
                 Name = (string?)node.Attribute("Name") ?? host, Host = host,
                 Protocol = protocol == "SSH2" ? "SSH" : "RDP", Port = port,
-                User = Effective(node, "Username") ?? "", Domain = Effective(node, "Domain") ?? ""
+                User = Effective(node, "Username") ?? "", Domain = Effective(node, "Domain") ?? "",
+                FolderPath = node.Ancestors().Reverse().Where(a => (string?)a.Attribute("Type") == "Container").Select(a => (string?)a.Attribute("Name") ?? "Dossier").ToArray()
             };
             Validate(connection);
             results.Add(connection);
@@ -72,6 +74,7 @@ public static class Connections
     {
         if (c == null || c.Host == null || c.User == null || c.Domain == null || c.Identity == null) throw new ArgumentException("Connexion incomplète : hôte, utilisateur, domaine ou clé manquant dans les données.");
         if (string.IsNullOrWhiteSpace(c.Name) || c.Name.Length > 256 || c.Name.Any(char.IsControl)) throw new ArgumentException("Nom invalide.");
+        if (c.FolderPath == null || c.FolderPath.Length > 128 || c.FolderPath.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 256 || p.Any(char.IsControl))) throw new ArgumentException("Dossier de connexion invalide.");
         if (c.Protocol == "Serial") {
             if (!Regex.IsMatch(c.Host, @"\A/dev/(?:tty(?:USB|ACM|S)[0-9]+|serial/by-id/[A-Za-z0-9_.:+-]+|pts/[0-9]+)\z")) throw new ArgumentException("Port série Linux invalide (exemple : /dev/ttyUSB0).");
             if (c.BaudRate < 50 || c.BaudRate > 4000000 || c.DataBits < 5 || c.DataBits > 8 || c.StopBits is not (1 or 2) ||
@@ -153,7 +156,20 @@ public static class SessionLauncher
     }
     public static void Launch(Connection c, bool sftp = false)
     {
-        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Les sessions de cette version nécessitent Linux.");
+        ValidateIdentity(c);
+        string executable = Executable(c, sftp);
+        string terminal = Find("gnome-terminal", "konsole", "xfce4-terminal", "xterm");
+        var start = new ProcessStartInfo(terminal) { UseShellExecute = false };
+        string name = Path.GetFileName(terminal);
+        start.ArgumentList.Add(name == "gnome-terminal" ? "--" : name == "xfce4-terminal" ? "--execute" : "-e");
+        start.ArgumentList.Add(executable);
+        foreach (string argument in Arguments(c, sftp)) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new IOException("Impossible de lancer le terminal Linux.");
+    }
+    private static void ValidateIdentity(Connection c)
+    {
+        Connections.Validate(c);
+        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Les sessions intégrées nécessitent Linux X11/XWayland.");
         if (c.Identity.Length > 0 && c.Protocol == "SSH") {
             if (!Path.IsPathFullyQualified(c.Identity) || !File.Exists(c.Identity) || new FileInfo(c.Identity).LinkTarget != null) throw new IOException("Choisissez une clé privée locale Linux existante.");
             if ((File.GetUnixFileMode(c.Identity) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
@@ -163,13 +179,23 @@ public static class SessionLauncher
             string? marker = new string(header, 0, key.Read(header, 0, header.Length)).Split('\n')[0].TrimEnd('\r');
             if (marker == null || !marker.StartsWith("-----BEGIN ") || !marker.EndsWith("PRIVATE KEY-----")) throw new IOException("Format OpenSSH/PEM requis ; les clés PuTTY PPK doivent être converties.");
         }
-        string executable = c.Protocol == "Serial" ? Find("picocom") : c.Protocol == "RDP" ? Find("xfreerdp3", "xfreerdp") : Find(sftp ? "sftp" : "ssh");
-        string terminal = Find("gnome-terminal", "konsole", "xfce4-terminal", "xterm");
-        var start = new ProcessStartInfo(terminal) { UseShellExecute = false };
-        string name = Path.GetFileName(terminal);
-        start.ArgumentList.Add(name == "gnome-terminal" ? "--" : name == "xfce4-terminal" ? "--execute" : "-e");
-        start.ArgumentList.Add(executable);
-        foreach (string argument in Arguments(c, sftp)) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new IOException("Impossible de lancer le terminal Linux.");
+    }
+    private static string Executable(Connection c, bool sftp) => c.Protocol == "Serial" ? Find("picocom") : c.Protocol == "RDP" ? Find("xfreerdp3", "xfreerdp") : Find(sftp ? "sftp" : "ssh");
+    public static ProcessStartInfo Embedded(Connection c, bool sftp, uint parent)
+    {
+        ValidateIdentity(c);
+        var args = Arguments(c, sftp);
+        if (c.Protocol == "RDP") {
+            if (c.MultiMonitor) throw new NotSupportedException("Le multi-écran RDP utilise encore le mode externe sous Linux. Utilisez Sessions → Ouvrir en fenêtre externe.");
+            args.Add("/parent-window:" + parent.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return Terminal(parent, Executable(c, sftp), args);
+    }
+    internal static ProcessStartInfo Terminal(uint parent, string executable, IEnumerable<string> arguments)
+    {
+        var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
+        foreach (string arg in new[] { "-into", parent.ToString(System.Globalization.CultureInfo.InvariantCulture), "-bg", "#181a1f", "-fg", "#e6e6e6", "-fa", "Monospace", "-fs", "11", "-sl", "5000", "-xrm", "XTerm*VT100.translations: #override\\n Ctrl Shift <Key>C: copy-selection(CLIPBOARD)\\n Ctrl Shift <Key>V: insert-selection(CLIPBOARD)", "-e", executable }) start.ArgumentList.Add(arg);
+        foreach (var arg in arguments) start.ArgumentList.Add(arg);
+        return start;
     }
 }
