@@ -114,8 +114,10 @@ internal sealed class CredentialBroker : IDisposable
             foreach (string arg in args.Skip(2)) start.ArgumentList.Add(arg);
             start.Environment.Remove(SocketVariable); start.Environment.Remove(TokenVariable);
             using var process = Process.Start(start) ?? throw new IOException();
-            await process.StandardInput.WriteLineAsync(password); process.StandardInput.Close(); password = null;
-            await process.WaitForExitAsync(); return process.ExitCode;
+            try {
+                await process.StandardInput.WriteLineAsync(password); process.StandardInput.Close(); password = null;
+                await process.WaitForExitAsync(); return process.ExitCode;
+            } finally { if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(); } }
         } catch (Exception ex) when (ex is IOException or SocketException or OperationCanceledException or JsonException or System.ComponentModel.Win32Exception) {
             Console.Error.WriteLine("Authentification intégrée indisponible. Reconnectez-vous en mode manuel."); return 1;
         }
