@@ -11,7 +11,7 @@ Import accepts SSH2/RDP metadata in non-fully-encrypted mRemoteNG XML. Protocol,
 
 Build with .NET 10 and PowerShell 7: `pwsh ./Build-AppImage.ps1 -SquashfsTool /usr/bin/mksquashfs`. The script pins and verifies the official AppImage runtime hash; output includes an AppImage, corresponding source ZIP and SHA-256 manifest. Under Windows a trusted MSYS2 mksquashfs and its DLLs can be supplied instead. `dotnet run --project MGRemote.Linux.csproj -- --self-test` runs synthetic offline checks without loading saved user data.
 
-This first prototype is unsigned. It is cross-built on Windows; structural packaging checks and synthetic tests do not establish Linux startup, distribution compatibility or live RDP/SSH functionality. No parity with the Windows edition is claimed.
+This prototype is unsigned. Published packages are built and exercised on Ubuntu 24.04 x86-64 with Xvfb; the release manifest records the exact validation environment. Packaged self-tests, GUI rendering and picocom pseudo-terminal checks do not establish physical serial compatibility, FUSE mounting, other distribution support or live RDP/SSH functionality. No parity with the Windows edition is claimed.
 
 ## Serial consoles and stability changes
 
