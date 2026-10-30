@@ -85,3 +85,6 @@ The Linux packager verifies a pinned official AppImage runtime digest and includ
 ## Attribution and license
 
 The Windows fork started from mRemoteNG commit `25ef453aaf18f292478dd41e5bb26798ff504312`. Copyright and contributor notices from mRemoteNG and bundled components are retained. MGRemote modifications and the Linux prototype are distributed under [GPL-2.0](COPYING.txt); third-party components retain their respective licenses. Release source archives provide the corresponding source for each published package.
+## Linux desktop parity development
+
+The linux-desktop-parity branch contains the Windows-style tree/configuration/session layout and an X11 embedded-session host. This work is not yet feature-equivalent to Windows and is not a replacement release. See [the development instructions](Linux/README.md) and its outstanding feature list. The current released AppImage remains a prototype.
