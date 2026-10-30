@@ -1,9 +1,30 @@
 name: MGRemote Linux validation
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the validated Linux preview and retire the previous Linux release/tag
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
+  publish-release:
+    if: inputs.publish
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Publish verified Linux artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 Linux/Publish-Release.py
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
