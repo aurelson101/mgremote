@@ -31,7 +31,7 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
     }
     protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
     {
-        if (!OperatingSystem.IsLinux() || parent.HandleDescriptor != "X11") {
+        if (!OperatingSystem.IsLinux() || parent.HandleDescriptor is not ("XID" or "X11")) {
             _notify("Les sessions intégrées de cette version nécessitent Linux X11/XWayland.");
             return base.CreateNativeControlCore(parent);
         }
@@ -46,7 +46,7 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
             _process.Exited += ProcessExited;
             if (!_process.Start()) throw new IOException("Impossible de lancer la session intégrée.");
             _resize.Start(); _notify("Session intégrée ouverte. Ctrl+Maj+C/V : copier/coller dans le terminal.");
-            return new PlatformHandle((IntPtr)_window, "X11");
+            return new PlatformHandle((IntPtr)_window, parent.HandleDescriptor);
         } catch (Exception ex) {
             _notify("Échec de la session : " + ex.Message); Dispose(); _nativeOwned = false;
             return base.CreateNativeControlCore(parent);
