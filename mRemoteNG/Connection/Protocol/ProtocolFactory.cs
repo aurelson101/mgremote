@@ -1,0 +1,71 @@
+﻿using mRemoteNG.Connection.Protocol.Http;
+using mRemoteNG.Connection.Protocol.RAW;
+using mRemoteNG.Connection.Protocol.RDP;
+using mRemoteNG.Connection.Protocol.Rlogin;
+using mRemoteNG.Connection.Protocol.SSH;
+using mRemoteNG.Connection.Protocol.Telnet;
+using mRemoteNG.Connection.Protocol.VNC;
+using mRemoteNG.Connection.Protocol.ARD;
+using System;
+using mRemoteNG.Connection.Protocol.PowerShell;
+using mRemoteNG.Connection.Protocol.WSL;
+using mRemoteNG.Connection.Protocol.Terminal;
+using mRemoteNG.Connection.Protocol.AnyDesk;
+using mRemoteNG.Resources.Language;
+using System.Runtime.Versioning;
+
+namespace mRemoteNG.Connection.Protocol
+{
+    [SupportedOSPlatform("windows")]
+    public class ProtocolFactory
+    {
+        private readonly RdpProtocolFactory _rdpProtocolFactory = new();
+
+        public ProtocolBase CreateProtocol(ConnectionInfo connectionInfo)
+        {
+            // ReSharper disable once SwitchStatementMissingSomeCases
+            switch (connectionInfo.Protocol)
+            {
+                case ProtocolType.RDP:
+                    RdpProtocol rdp = _rdpProtocolFactory.Build(connectionInfo.RdpVersion);
+                    rdp.LoadBalanceInfoUseUtf8 = Properties.OptionsAdvancedPage.Default.RdpLoadBalanceInfoUseUtf8;
+                    return rdp;
+                case ProtocolType.VNC:
+                    return new ProtocolVNC();
+                case ProtocolType.ARD:
+                    return new ProtocolARD();
+                case ProtocolType.SSH1:
+                    throw new NotSupportedException("MGRemote requires SSHv2. Change this connection to SSH2.");
+                case ProtocolType.SSH2:
+                    // Imported PuTTYNG selections must not bypass the integrated terminal.
+                    return new ProtocolTerminal(connectionInfo, forceSsh: true);
+                case ProtocolType.Telnet:
+                case ProtocolType.Rlogin:
+                    throw new NotSupportedException("MGRemote disables Telnet and rlogin. Use SSH2 instead.");
+                case ProtocolType.RAW:
+                    return new RawProtocol();
+                case ProtocolType.HTTP:
+                    return new ProtocolHTTP(connectionInfo.RenderingEngine);
+                case ProtocolType.HTTPS:
+                    return new ProtocolHTTPS(connectionInfo.RenderingEngine);
+                case ProtocolType.PowerShell:
+                    return new ProtocolPowerShell(connectionInfo);
+                case ProtocolType.WSL:
+                    return new ProtocolWSL(connectionInfo);
+                case ProtocolType.Terminal:
+                    return new ProtocolTerminal(connectionInfo);
+                case ProtocolType.AnyDesk:
+                    return new ProtocolAnyDesk(connectionInfo);
+                case ProtocolType.IntApp:
+                    if (connectionInfo.ExtApp == "")
+                    {
+                        throw (new Exception(Language.NoExtAppDefined));
+                    }
+                    return new IntegratedProgram();
+            }
+
+            return default(ProtocolBase);
+        }
+    }
+}
+// MGRemote modification, 2026-10-29. GPL-2.0; see COPYING.txt.

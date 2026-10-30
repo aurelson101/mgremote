@@ -1,0 +1,30 @@
+﻿using System;
+using System.IO;
+using System.Reflection;
+using System.Runtime.Versioning;
+using System.Windows.Forms;
+using mRemoteNG.Connection;
+
+namespace mRemoteNG.App.Info
+{
+    [SupportedOSPlatform("windows")]
+    public static class SettingsFileInfo
+    {
+        private static readonly string? ExePath = Path.GetDirectoryName(Assembly.GetAssembly(typeof(ConnectionInfo))?.Location);
+
+        // ExePath resolves the running assembly's own directory and is always available at runtime.
+        // MGRemote modification, 2026-10-29: never share the upstream connection/credential store.
+        public static string SettingsPath => Runtime.IsPortableEdition ? ExePath! : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MGRemote");
+
+        public static string LayoutFileName { get; } = "pnlLayout.xml";
+        public static string ExtAppsFilesName { get; } = "extApps.xml";
+        public static string ThemesFileName { get; } = "Themes.xml";
+        public static string LocalConnectionProperties { get; } = "LocalConnectionProperties.xml";
+
+        public static string ThemeFolder { get; } =
+            SettingsPath != null ? Path.Combine(SettingsPath, "Themes") : String.Empty;
+
+        public static string InstalledThemeFolder { get; } =
+            ExePath != null ? Path.Combine(ExePath, "Themes") : String.Empty;
+    }
+}

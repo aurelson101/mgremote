@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <Deterministic>false</Deterministic>
+    <RootNamespace>BrightIdeasSoftware</RootNamespace>
+    <AssemblyName>ObjectListView</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <UseWindowsForms>true</UseWindowsForms>
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <EnableWinFormsAnalyzers>false</EnableWinFormsAnalyzers>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)' == 'x64'">
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)' == 'ARM64'">
+    <PlatformTarget>ARM64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="CustomDictionary.xml" Link="CustomDictionary.xml" />
+    <Content Include="Resources\clear-filter.png" Link="Resources\clear-filter.png" />
+    <Content Include="Resources\coffee.jpg" Link="Resources\coffee.jpg" />
+    <Content Include="Resources\filter-icons3.png" Link="Resources\filter-icons3.png" />
+    <Content Include="Resources\filter.png" Link="Resources\filter.png" />
+    <Content Include="Resources\sort-ascending.png" Link="Resources\sort-ascending.png" />
+    <Content Include="Resources\sort-descending.png" Link="Resources\sort-descending.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="CellEditing\" />
+    <Folder Include="DragDrop\" />
+    <Folder Include="Filtering\" />
+    <Folder Include="Implementation\" />
+    <Folder Include="Utilities\" />
+    <Folder Include="SubControls\" />
+    <Folder Include="Resources\" />
+    <Folder Include="Rendering\" />
+  </ItemGroup>
+</Project>

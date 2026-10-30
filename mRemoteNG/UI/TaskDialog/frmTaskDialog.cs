@@ -1,0 +1,584 @@
+﻿using mRemoteNG.Themes;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Windows.Forms;
+using mRemoteNG.UI.Controls;
+using mRemoteNG.Resources.Language;
+using System.Runtime.Versioning;
+
+namespace mRemoteNG.UI.TaskDialog
+{
+    [SupportedOSPlatform("windows")]
+    public partial class frmTaskDialog : Form
+    {
+        //--------------------------------------------------------------------------------
+
+        #region PRIVATE members
+
+        //--------------------------------------------------------------------------------
+
+        private string _mainInstruction = "Main Instruction Text";
+
+        private readonly Font _mainInstructionFont =
+            new("Segoe UI", 11.75F, FontStyle.Regular, GraphicsUnit.Point, 0);
+
+        private readonly List<MrngRadioButton> _radioButtonCtrls = [];
+        private readonly List<CommandButton> _commandButtonCtrls = [];
+        private Control _focusControl;
+
+        private bool _isVista = false;
+
+        private int _mainInstructionLeftMargin;
+        private int _mainInstructionRightMargin;
+
+        // Design-time size of imgMain at 96 DPI
+        private const int DesignImgMainSize = 32;
+
+        private bool _themeApplied;
+
+        #endregion
+
+        //--------------------------------------------------------------------------------
+
+        #region PROPERTIES
+
+        //--------------------------------------------------------------------------------
+        public ESysIcons MainIcon { get; set; } = ESysIcons.Question;
+        public ESysIcons FooterIcon { get; set; } = ESysIcons.Warning;
+
+        public string Title
+        {
+            get => Text;
+            set => Text = value;
+        }
+
+        public string MainInstruction
+        {
+            get => _mainInstruction;
+            set
+            {
+                _mainInstruction = value;
+                Invalidate();
+            }
+        }
+
+        public string Content
+        {
+            get => lbContent.Text;
+            set => lbContent.Text = value;
+        }
+
+        public string ExpandedInfo
+        {
+            get => lbExpandedInfo.Text;
+            set => lbExpandedInfo.Text = value;
+        }
+
+        public string Footer
+        {
+            get => lbFooter.Text;
+            set => lbFooter.Text = value;
+        }
+
+        public int DefaultButtonIndex { get; set; }
+
+        public string RadioButtons { get; set; } = "";
+
+        public int RadioButtonIndex
+        {
+            get
+            {
+                foreach (MrngRadioButton rb in _radioButtonCtrls)
+                    if (rb.Checked)
+                        return (int)rb.Tag;
+                return -1;
+            }
+        }
+
+        public string CommandButtons { get; set; } = "";
+        public int CommandButtonClickedIndex { get; private set; } = -1;
+
+        public ETaskDialogButtons Buttons { get; set; } = ETaskDialogButtons.YesNoCancel;
+
+        public string VerificationText
+        {
+            get => cbVerify.Text;
+            set => cbVerify.Text = value;
+        }
+
+        public bool VerificationCheckBoxChecked
+        {
+            get => cbVerify.Checked;
+            set => cbVerify.Checked = value;
+        }
+
+        private bool Expanded { get; set; }
+
+        #endregion
+
+        //--------------------------------------------------------------------------------
+
+        #region CONSTRUCTOR
+
+        //--------------------------------------------------------------------------------
+        public frmTaskDialog()
+        {
+            InitializeComponent();
+
+            // _isVista = VistaTaskDialog.IsAvailableOnThisOS;
+            if (!_isVista && CTaskDialog.UseToolWindowOnXp) // <- shall we use the smaller toolbar?
+                FormBorderStyle = FormBorderStyle.FixedToolWindow;
+
+            MainInstruction = "Main Instruction";
+            Content = "";
+            ExpandedInfo = "";
+            Footer = "";
+            VerificationText = "";
+        }
+
+        #endregion
+
+        //--------------------------------------------------------------------------------
+
+        #region BuildForm
+
+        // This is the main routine that should be called before .ShowDialog()
+        //--------------------------------------------------------------------------------
+        private bool _formBuilt;
+
+        public void BuildForm()
+        {
+            // Force handle creation so DeviceDpi is accurate and any initial
+            // auto-scaling is applied before we compute the layout.
+            _ = Handle;
+
+            // Reset focus control for this rebuild to ensure it's properly reassigned
+            // This prevents stale references to disposed controls after rebuilds
+            _focusControl = null;
+
+            // Clean up previously created dynamic controls (idempotent rebuild)
+            foreach (var rb in _radioButtonCtrls)
+            {
+                pnlRadioButtons.Controls.Remove(rb);
+                rb.Dispose();
+            }
+            _radioButtonCtrls.Clear();
+
+            foreach (var cb in _commandButtonCtrls)
+            {
+                cb.Click -= CommandButton_Click;
+                pnlCommandButtons.Controls.Remove(cb);
+                cb.Dispose();
+            }
+            _commandButtonCtrls.Clear();
+
+            int formHeight = 0;
+            imgMain.Width = LogicalToDeviceUnits(DesignImgMainSize);
+            imgMain.Height = LogicalToDeviceUnits(DesignImgMainSize);
+
+            // Setup Main Instruction
+            switch (MainIcon)
+            {
+                case ESysIcons.Information:
+                    imgMain.Image = SystemIcons.Information.ToBitmap();
+                    break;
+                case ESysIcons.Question:
+                    imgMain.Image = SystemIcons.Question.ToBitmap();
+                    break;
+                case ESysIcons.Warning:
+                    imgMain.Image = SystemIcons.Warning.ToBitmap();
+                    break;
+                case ESysIcons.Error:
+                    imgMain.Image = SystemIcons.Error.ToBitmap();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            lbMainInstruction.Text = _mainInstruction;
+            lbMainInstruction.Font = _mainInstructionFont;
+            AdjustLabelHeight(lbMainInstruction);
+            pnlMainInstruction.Height = Math.Max(LogicalToDeviceUnits(41), lbMainInstruction.Height + LogicalToDeviceUnits(16));
+
+            _mainInstructionLeftMargin = imgMain.Left + imgMain.Width + LogicalToDeviceUnits(imgMain.Padding.Right);
+            _mainInstructionRightMargin = LogicalToDeviceUnits(8);
+            formHeight += pnlMainInstruction.Height;
+
+            // Setup Content
+            pnlContent.Visible = Content != "";
+            if (Content != "")
+            {
+                AdjustLabelHeight(lbContent);
+                pnlContent.Height = lbContent.Height + LogicalToDeviceUnits(4);
+                formHeight += pnlContent.Height;
+            }
+
+            bool showVerifyCheckbox = cbVerify.Text != "";
+            cbVerify.Visible = showVerifyCheckbox;
+
+            // Setup Expanded Info and Buttons panels
+            if (ExpandedInfo == "")
+            {
+                pnlExpandedInfo.Visible = false;
+                lbShowHideDetails.Visible = false;
+                cbVerify.Top = LogicalToDeviceUnits(12);
+                pnlButtons.Height = LogicalToDeviceUnits(40);
+            }
+            else
+            {
+                AdjustLabelHeight(lbExpandedInfo);
+                pnlExpandedInfo.Height = lbExpandedInfo.Height + LogicalToDeviceUnits(4);
+                pnlExpandedInfo.Visible = Expanded;
+                lbShowHideDetails.Text = Expanded ? "        Hide details" : "        Show details";
+                lbShowHideDetails.ImageIndex = Expanded ? 0 : 3;
+                if (!showVerifyCheckbox)
+                    pnlButtons.Height = LogicalToDeviceUnits(40);
+                if (Expanded)
+                    formHeight += pnlExpandedInfo.Height;
+            }
+
+            // Setup RadioButtons
+            pnlRadioButtons.Visible = RadioButtons != "";
+            if (RadioButtons != "")
+            {
+                string[] arr = RadioButtons.Split('|');
+                int pnlHeight = LogicalToDeviceUnits(12);
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    MrngRadioButton rb = new() { Parent = pnlRadioButtons};
+                    rb.Location = new Point(LogicalToDeviceUnits(60), LogicalToDeviceUnits(4) + i * rb.Height);
+                    rb.Text = arr[i];
+                    rb.Tag = i;
+                    rb.Checked = DefaultButtonIndex == i;
+                    rb.Width = Width - rb.Left - LogicalToDeviceUnits(15);
+                    pnlHeight += rb.Height;
+                    _radioButtonCtrls.Add(rb);
+                }
+
+                pnlRadioButtons.Height = pnlHeight;
+                formHeight += pnlRadioButtons.Height;
+            }
+
+            // Setup CommandButtons
+            pnlCommandButtons.Visible = CommandButtons != "";
+            if (CommandButtons != "")
+            {
+                string[] arr = CommandButtons.Split('|');
+                int t = LogicalToDeviceUnits(8);
+                int pnlHeight = LogicalToDeviceUnits(16);
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    CommandButton btn = new()
+                    {
+                        Parent = pnlCommandButtons, Location = new Point(LogicalToDeviceUnits(50), t)
+                    };
+                    if (_isVista) // <- tweak font if vista
+                        btn.Font = new Font(btn.Font, FontStyle.Regular);
+                    btn.Text = arr[i];
+                    btn.Size = new Size(Width - btn.Left - LogicalToDeviceUnits(15), btn.GetBestHeight());
+                    t += btn.Height;
+                    pnlHeight += btn.Height;
+                    btn.Tag = i;
+                    btn.Click += CommandButton_Click;
+                    _commandButtonCtrls.Add(btn);
+                    if (i == DefaultButtonIndex)
+                        _focusControl = btn;
+                }
+
+                pnlCommandButtons.Height = pnlHeight;
+                formHeight += pnlCommandButtons.Height;
+            }
+
+            // Setup Buttons
+            switch (Buttons)
+            {
+                case ETaskDialogButtons.YesNo:
+                    bt1.Visible = false;
+                    bt2.Text = Language.Yes;
+                    bt2.DialogResult = DialogResult.Yes;
+                    bt3.Text = Language.No;
+                    bt3.DialogResult = DialogResult.No;
+                    AcceptButton = bt2;
+                    CancelButton = bt3;
+                    _focusControl = bt2;
+                    break;
+                case ETaskDialogButtons.YesNoCancel:
+                    bt1.Text = Language.Yes;
+                    bt1.DialogResult = DialogResult.Yes;
+                    bt2.Text = Language.No;
+                    bt2.DialogResult = DialogResult.No;
+                    bt3.Text = Language._Cancel;
+                    bt3.DialogResult = DialogResult.Cancel;
+                    AcceptButton = bt1;
+                    CancelButton = bt3;
+                    _focusControl = bt1;
+                    break;
+                case ETaskDialogButtons.OkCancel:
+                    bt1.Visible = false;
+                    bt2.Text = Language._Ok;
+                    bt2.DialogResult = DialogResult.OK;
+                    bt3.Text = Language._Cancel;
+                    bt3.DialogResult = DialogResult.Cancel;
+                    AcceptButton = bt2;
+                    CancelButton = bt3;
+                    _focusControl = bt2;
+                    break;
+                case ETaskDialogButtons.Ok:
+                    bt1.Visible = false;
+                    bt2.Visible = false;
+                    bt3.Text = Language._Ok;
+                    bt3.DialogResult = DialogResult.OK;
+                    AcceptButton = bt3;
+                    CancelButton = bt3;
+                    _focusControl = bt3;
+                    break;
+                case ETaskDialogButtons.Close:
+                    bt1.Visible = false;
+                    bt2.Visible = false;
+                    bt3.Text = Language._Close;
+                    bt3.DialogResult = DialogResult.Cancel;
+                    CancelButton = bt3;
+                    _focusControl = bt3;
+                    break;
+                case ETaskDialogButtons.Cancel:
+                    bt1.Visible = false;
+                    bt2.Visible = false;
+                    bt3.Text = Language._Cancel;
+                    bt3.DialogResult = DialogResult.Cancel;
+                    CancelButton = bt3;
+                    _focusControl = bt3;
+                    break;
+                case ETaskDialogButtons.None:
+                    bt1.Visible = false;
+                    bt2.Visible = false;
+                    bt3.Visible = false;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            ControlBox = Buttons == ETaskDialogButtons.Cancel ||
+                         Buttons == ETaskDialogButtons.Close ||
+                         Buttons == ETaskDialogButtons.OkCancel ||
+                         Buttons == ETaskDialogButtons.YesNoCancel;
+
+            if (!showVerifyCheckbox && ExpandedInfo == "" && Buttons == ETaskDialogButtons.None)
+                pnlButtons.Visible = false;
+            else
+                formHeight += pnlButtons.Height;
+
+            pnlFooter.Visible = Footer != "";
+            if (Footer != "")
+            {
+                AdjustLabelHeight(lbFooter);
+                pnlFooter.Height = Math.Max(LogicalToDeviceUnits(28), lbFooter.Height + LogicalToDeviceUnits(16));
+                switch (FooterIcon)
+                {
+                    case ESysIcons.Information:
+                        imgFooter.Image = ResizeBitmap(SystemIcons.Information.ToBitmap(), 16, 16);
+                        break;
+                    case ESysIcons.Question:
+                        imgFooter.Image = ResizeBitmap(SystemIcons.Question.ToBitmap(), 16, 16);
+                        break;
+                    case ESysIcons.Warning:
+                        imgFooter.Image = ResizeBitmap(SystemIcons.Warning.ToBitmap(), 16, 16);
+                        break;
+                    case ESysIcons.Error:
+                        imgFooter.Image = ResizeBitmap(SystemIcons.Error.ToBitmap(), 16, 16);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+
+                formHeight += pnlFooter.Height;
+            }
+
+            ClientSize = new Size(ClientSize.Width, formHeight);
+
+            _formBuilt = true;
+            if (!_themeApplied)
+            {
+                ThemeManager.getInstance().ThemeChanged += ApplyTheme;
+                _themeApplied = true;
+            }
+            ApplyTheme();
+        }
+
+        // Apply the dark/light title bar before the window is shown to avoid a white flash.
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            ThemeManager.getInstance().ApplyThemeToTitleBar(this);
+        }
+
+        private void ApplyTheme()
+        {
+            if (!ThemeManager.getInstance().ActiveAndExtended) return;
+
+            pnlButtons.BackColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            pnlButtons.ForeColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            panel2.BackColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            panel2.ForeColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            pnlFooter.BackColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            pnlFooter.ForeColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            panel5.BackColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            panel5.ForeColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            panel3.BackColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            panel3.ForeColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            pnlCommandButtons.BackColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            pnlCommandButtons.ForeColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            pnlMainInstruction.BackColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            pnlMainInstruction.ForeColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            pnlContent.BackColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            pnlContent.ForeColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            pnlExpandedInfo.BackColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            pnlExpandedInfo.ForeColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+            pnlRadioButtons.BackColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Background");
+            pnlRadioButtons.ForeColor =
+                ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Dialog_Foreground");
+        }
+
+        //--------------------------------------------------------------------------------
+        private Image ResizeBitmap(Image srcImg, int newWidth, int newHeight)
+        {
+            float percentWidth = LogicalToDeviceUnits(newWidth) / (float)srcImg.Width;
+            float percentHeight = LogicalToDeviceUnits(newHeight) / (float)srcImg.Height;
+
+            float resizePercent = percentHeight < percentWidth ? percentHeight : percentWidth;
+
+            int w = (int)(srcImg.Width * resizePercent);
+            int h = (int)(srcImg.Height * resizePercent);
+            Bitmap b = new(w, h);
+
+            using (Graphics g = Graphics.FromImage(b))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage(srcImg, 0, 0, w, h);
+            }
+
+            return b;
+        }
+
+        //--------------------------------------------------------------------------------
+        // utility function for setting a Label's height
+        private static void AdjustLabelHeight(Control lb)
+        {
+            string text = lb.Text;
+            Font textFont = lb.Font;
+            SizeF layoutSize = new(lb.ClientSize.Width, 5000.0F);
+
+            using (Graphics g = Graphics.FromHwnd(lb.Handle))
+            {
+                SizeF stringSize = g.MeasureString(text, textFont, layoutSize);
+                lb.Height = (int)stringSize.Height + 4;
+            }
+        }
+
+        #endregion
+
+        //--------------------------------------------------------------------------------
+
+        #region EVENTS
+
+        //--------------------------------------------------------------------------------
+        private void CommandButton_Click(object sender, EventArgs e)
+        {
+            CommandButtonClickedIndex = (int)((CommandButton)sender).Tag;
+            DialogResult = DialogResult.OK;
+        }
+
+
+        //--------------------------------------------------------------------------------
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            if (_formBuilt)
+                BuildForm();
+        }
+
+        //--------------------------------------------------------------------------------
+        protected override void OnShown(EventArgs e)
+        {
+            if (!_formBuilt)
+                throw new Exception("frmTaskDialog : Please call .BuildForm() before showing the TaskDialog");
+            base.OnShown(e);
+        }
+
+        //--------------------------------------------------------------------------------
+        private void lbDetails_MouseEnter(object sender, EventArgs e)
+        {
+            lbShowHideDetails.ImageIndex = Expanded ? 1 : 4;
+        }
+
+        //--------------------------------------------------------------------------------
+        private void lbDetails_MouseLeave(object sender, EventArgs e)
+        {
+            lbShowHideDetails.ImageIndex = Expanded ? 0 : 3;
+        }
+
+        //--------------------------------------------------------------------------------
+        private void lbDetails_MouseUp(object sender, MouseEventArgs e)
+        {
+            lbShowHideDetails.ImageIndex = Expanded ? 1 : 4;
+        }
+
+        //--------------------------------------------------------------------------------
+        private void lbDetails_MouseDown(object sender, MouseEventArgs e)
+        {
+            lbShowHideDetails.ImageIndex = Expanded ? 2 : 5;
+        }
+
+        //--------------------------------------------------------------------------------
+        private void lbDetails_Click(object sender, EventArgs e)
+        {
+            Expanded = !Expanded;
+            pnlExpandedInfo.Visible = Expanded;
+            lbShowHideDetails.Text = Expanded ? "        Hide details" : "        Show details";
+            if (Expanded)
+                Height += pnlExpandedInfo.Height;
+            else
+                Height -= pnlExpandedInfo.Height;
+        }
+
+        //--------------------------------------------------------------------------------
+        private void frmTaskDialog_Shown(object sender, EventArgs e)
+        {
+            if (CTaskDialog.PlaySystemSounds)
+            {
+                switch (MainIcon)
+                {
+                    case ESysIcons.Error:
+                        System.Media.SystemSounds.Hand.Play();
+                        break;
+                    case ESysIcons.Information:
+                        System.Media.SystemSounds.Asterisk.Play();
+                        break;
+                    case ESysIcons.Question:
+                        System.Media.SystemSounds.Asterisk.Play();
+                        break;
+                    case ESysIcons.Warning:
+                        System.Media.SystemSounds.Exclamation.Play();
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+            }
+
+            // Focus the default button, with safety checks for validity
+            if (_focusControl != null && !_focusControl.IsDisposed && _focusControl.CanFocus)
+                _focusControl.Focus();
+        }
+
+        #endregion
+
+        //--------------------------------------------------------------------------------
+    }
+}

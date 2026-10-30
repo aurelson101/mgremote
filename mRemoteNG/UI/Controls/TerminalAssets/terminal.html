@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-NONCE'; style-src 'unsafe-inline'; img-src data:; connect-src 'none';">
+<style>/*CSS*/
+html,body{margin:0;height:100%;overflow:hidden;background:#181a1f}#terminal{height:100%;box-sizing:border-box;padding:8px}</style>
+</head><body><div id="terminal"></div><script nonce="NONCE">/*XTERM*/</script><script nonce="NONCE">/*FIT*/</script>
+<script nonce="NONCE">
+const term=new Terminal({cursorBlink:true,fontFamily:'Cascadia Mono, Consolas, monospace',fontSize:14,scrollback:5000,allowProposedApi:false,theme:{background:'#181a1f',foreground:'#e6e6e6',cursor:'#82aaff'}});
+const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(document.getElementById('terminal'));
+const send=(type,extra={})=>chrome.webview.postMessage({type,...extra});
+// Remote output cannot access the Windows clipboard (OSC 52), open links or execute script.
+term.parser.registerOscHandler(52,()=>true);
+term.onData(text=>send('input',{text}));
+term.onResize(({cols,rows})=>send('resize',{cols,rows}));
+window.mgPaste=text=>{term.paste(text);term.focus();};
+term.attachCustomKeyEventHandler(e=>{
+ if(e.type!=='keydown')return true;
+ if(e.ctrlKey&&e.shiftKey&&e.code==='KeyC'){send('copy',{text:term.getSelection()});return false;}
+ if((e.ctrlKey&&e.code==='KeyV')||(e.shiftKey&&e.code==='Insert')){e.preventDefault();send('paste');return false;}
+ return true;
+});
+document.addEventListener('paste',e=>{e.preventDefault();e.stopImmediatePropagation();send('paste');},true);
+document.addEventListener('contextmenu',e=>{e.preventDefault();send('menu',{text:term.getSelection()});});
+chrome.webview.addEventListener('message',e=>{if(e.data.type==='output')term.write(e.data.text,()=>send('ack'));});
+new ResizeObserver(()=>{if(document.body.clientWidth>30&&document.body.clientHeight>30)fit.fit();}).observe(document.body);
+send('ready');fit.fit();term.focus();
+</script></body></html>

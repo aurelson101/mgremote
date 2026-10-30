@@ -1,0 +1,569 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Windows.Forms;
+using mRemoteNG.Connection;
+using mRemoteNG.Container;
+using mRemoteNG.Tools.Clipboard;
+using mRemoteNG.Tree;
+using mRemoteNG.Tree.Root;
+using mRemoteNG.UI.Controls;
+using mRemoteNG.UI.Controls.ConnectionTree;
+using NSubstitute;
+using NUnit.Framework;
+
+namespace mRemoteNGTests.UI.Controls
+{
+	public class ConnectionTreeTests
+	{
+		private ConnectionTreeSearchTextFilter _filter;
+		private mRemoteNG.UI.Controls.ConnectionTree.ConnectionTree _connectionTree;
+
+		[SetUp]
+		public void Setup()
+		{
+			_filter = new ConnectionTreeSearchTextFilter();
+			_connectionTree = new mRemoteNG.UI.Controls.ConnectionTree.ConnectionTree
+			{
+				UseFiltering = true
+			};
+			mRemoteNG.Properties.OptionsAppearancePage.Default.EnableConnectionTreeAnimations = true;
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void FilteringIsRetainedAndUpdatedWhenNodeDeleted()
+		{
+			// root
+			// |- folder1
+			// |	|- con1
+			// |	|- dontshowme
+			// |- folder2
+			//		|- con2
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var folder1 = new ContainerInfo {Name = "folder1"};
+			var folder2 = new ContainerInfo {Name = "folder2"};
+			var con1 = new ConnectionInfo {Name = "con1"};
+			var con2 = new ConnectionInfo {Name = "con2"};
+			var conDontShow = new ConnectionInfo {Name = "dontshowme" };
+			root.AddChildRange(new []{folder1, folder2});
+			folder1.AddChildRange(new []{con1, conDontShow});
+			folder2.AddChild(con2);
+			connectionTreeModel.AddRootNode(root);
+
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			// ensure all folders expanded
+			_connectionTree.ExpandAll();
+
+			// apply filtering on the tree
+			_filter.FilterText = "con";
+			_connectionTree.ModelFilter = _filter;
+
+			connectionTreeModel.DeleteNode(con1);
+
+			Assert.That(_connectionTree.IsFiltering, Is.True);
+			Assert.That(_connectionTree.FilteredObjects, Does.Not.Contain(con1));
+			Assert.That(_connectionTree.FilteredObjects, Does.Not.Contain(conDontShow));
+			Assert.That(_connectionTree.FilteredObjects, Does.Contain(con2));
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void ConnectionColorIsUsedForItsNameInTheTree()
+		{
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var folder = new ContainerInfo {Name = "folder"};
+			var coloured = new ConnectionInfo {Name = "coloured", Color = "Red"};
+			// Other tests change the default inheritance; this one must show its own colour.
+			coloured.Inheritance.TurnOffInheritanceCompletely();
+			root.AddChild(folder);
+			folder.AddChild(coloured);
+			connectionTreeModel.AddRootNode(root);
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.ExpandAll();
+
+			var item = _connectionTree.ModelToItem(coloured);
+
+			Assert.That(item, Is.Not.Null);
+			Assert.That(item.GetSubItem(0).ForeColor.ToArgb(), Is.EqualTo(System.Drawing.Color.Red.ToArgb()));
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void ApplyFilterRevealsMatchesInsideCollapsedFolders()
+		{
+			// root
+			// |- folder1
+			//		|- subfolder
+			//			|- sql01
+			mRemoteNG.Properties.OptionsAppearancePage.Default.EnableConnectionTreeAnimations = false;
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var folder1 = new ContainerInfo {Name = "folder1"};
+			var subfolder = new ContainerInfo {Name = "subfolder"};
+			var sql01 = new ConnectionInfo {Name = "sql01"};
+			root.AddChild(folder1);
+			folder1.AddChild(subfolder);
+			subfolder.AddChild(sql01);
+			connectionTreeModel.AddRootNode(root);
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.CollapseAll();
+
+			_connectionTree.ApplyFilter("sql");
+
+			Assert.That(_connectionTree.FilteredObjects, Does.Contain(sql01));
+			Assert.That(_connectionTree.IsExpanded(folder1), Is.True);
+			Assert.That(_connectionTree.IsExpanded(subfolder), Is.True);
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void RemoveFilterCollapsesFoldersThatTheFilterExpanded()
+		{
+			mRemoteNG.Properties.OptionsAppearancePage.Default.EnableConnectionTreeAnimations = false;
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var openFolder = new ContainerInfo {Name = "openFolder"};
+			var closedFolder = new ContainerInfo {Name = "closedFolder"};
+			var con1 = new ConnectionInfo {Name = "match1"};
+			var con2 = new ConnectionInfo {Name = "match2"};
+			root.AddChildRange(new []{openFolder, closedFolder});
+			openFolder.AddChild(con1);
+			closedFolder.AddChild(con2);
+			connectionTreeModel.AddRootNode(root);
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.CollapseAll();
+			_connectionTree.Expand(root);
+			_connectionTree.Expand(openFolder);
+
+			_connectionTree.ApplyFilter("match");
+			_connectionTree.RemoveFilter();
+
+			Assert.That(_connectionTree.IsExpanded(openFolder), Is.True);
+			Assert.That(_connectionTree.IsExpanded(closedFolder), Is.False);
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void FilteringDoesNotChangeSavedFolderExpansionState()
+		{
+			// IsExpanded is persisted and changing it triggers save-on-edit,
+			// so a search must not raise PropertyChanged on any folder
+			mRemoteNG.Properties.OptionsAppearancePage.Default.EnableConnectionTreeAnimations = false;
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var folder = new ContainerInfo {Name = "folder"};
+			var con = new ConnectionInfo {Name = "match"};
+			root.AddChild(folder);
+			folder.AddChild(con);
+			connectionTreeModel.AddRootNode(root);
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.CollapseAll();
+			bool folderExpandedBefore = folder.IsExpanded;
+			var changedProperties = new List<string>();
+			connectionTreeModel.PropertyChanged += (sender, args) => changedProperties.Add(args.PropertyName);
+
+			_connectionTree.ApplyFilter("match");
+			Assert.That(_connectionTree.IsExpanded(folder), Is.True);
+			_connectionTree.RemoveFilter();
+
+			Assert.That(folder.IsExpanded, Is.EqualTo(folderExpandedBefore));
+			Assert.That(changedProperties, Does.Not.Contain(nameof(ContainerInfo.IsExpanded)));
+		}
+
+	    [Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void CannotAddConnectionToPuttySessionNode()
+	    {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+            var puttyRoot = new RootNodeInfo(RootNodeType.PuttySessions);
+	        connectionTreeModel.AddRootNode(root);
+	        connectionTreeModel.AddRootNode(puttyRoot);
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+
+			_connectionTree.SelectedObject = puttyRoot;
+	        _connectionTree.AddConnection();
+
+	        Assert.That(puttyRoot.Children, Is.Empty);
+	    }
+
+	    [Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void CannotAddFolderToPuttySessionNode()
+	    {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+	        var puttyRoot = new RootNodeInfo(RootNodeType.PuttySessions);
+	        connectionTreeModel.AddRootNode(root);
+	        connectionTreeModel.AddRootNode(puttyRoot);
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+
+			_connectionTree.SelectedObject = puttyRoot;
+	        _connectionTree.AddFolder();
+
+	        Assert.That(puttyRoot.Children, Is.Empty);
+	    }
+
+	    [Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void CannotDuplicateRootConnectionNode()
+	    {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+	        connectionTreeModel.AddRootNode(root);
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+
+			_connectionTree.SelectedObject = root;
+            _connectionTree.DuplicateSelectedNode();
+
+	        Assert.That(connectionTreeModel.RootNodes, Has.One.Items);
+	    }
+
+	    [Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void CanDuplicateConnectionNode()
+	    {
+		    var connectionTreeModel = new ConnectionTreeModel();
+		    var root = new RootNodeInfo(RootNodeType.Connection);
+			var con1 = new ConnectionInfo();
+			root.AddChild(con1);
+		    connectionTreeModel.AddRootNode(root);
+		    _connectionTree.ConnectionTreeModel = connectionTreeModel;
+		    _connectionTree.ExpandAll();
+
+			_connectionTree.SelectedObject = con1;
+		    _connectionTree.DuplicateSelectedNode();
+
+		    Assert.That(root.Children, Has.Exactly(2).Items);
+	    }
+
+		[Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void CannotDuplicateRootPuttyNode()
+	    {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var puttyRoot = new RootNodeInfo(RootNodeType.PuttySessions);
+	        connectionTreeModel.AddRootNode(puttyRoot);
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+
+			_connectionTree.SelectedObject = puttyRoot;
+	        _connectionTree.DuplicateSelectedNode();
+
+	        Assert.That(connectionTreeModel.RootNodes, Has.One.Items);
+	    }
+
+	    [Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void CannotDuplicatePuttyConnectionNode()
+	    {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var puttyRoot = new RootNodeInfo(RootNodeType.PuttySessions);
+            var puttyConnection = new PuttySessionInfo();
+            puttyRoot.AddChild(puttyConnection);
+	        connectionTreeModel.AddRootNode(puttyRoot);
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+
+            _connectionTree.SelectedObject = puttyConnection;
+	        _connectionTree.DuplicateSelectedNode();
+
+	        Assert.That(puttyRoot.Children, Has.One.Items);
+	    }
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void RefreshVisibleRoots_HidesAndRestoresPuttyRoot_WhenToggledOffAndOn()
+		{
+			var connectionTreeModel = new ConnectionTreeModel();
+			var regularRoot = new RootNodeInfo(RootNodeType.Connection);
+			var puttyRoot = new RootPuttySessionsNodeInfo { Name = "putty-root" };
+			var puttySession = new PuttySessionInfo { Name = "putty-session" };
+			puttyRoot.AddChild(puttySession);
+			connectionTreeModel.AddRootNode(regularRoot);
+			connectionTreeModel.AddRootNode(puttyRoot);
+
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.ExpandAll();
+
+			_filter.FilterText = "putty-session";
+			_connectionTree.ModelFilter = _filter;
+			Assert.That(_connectionTree.FilteredObjects, Does.Contain(puttySession));
+			Assert.That(_connectionTree.Objects.Cast<object>(), Does.Contain(puttyRoot));
+
+			connectionTreeModel.RemoveRootNode(puttyRoot);
+			_connectionTree.RefreshVisibleRoots();
+			Assert.That(_connectionTree.Objects.Cast<object>(), Does.Not.Contain(puttyRoot));
+			Assert.That(_connectionTree.FilteredObjects, Does.Not.Contain(puttySession));
+			Assert.That(_connectionTree.NodeSearcher.SearchByName("putty-session"), Is.Empty);
+
+			connectionTreeModel.AddRootNode(puttyRoot);
+			_connectionTree.RefreshVisibleRoots();
+			Assert.That(_connectionTree.Objects.Cast<object>(), Does.Contain(puttyRoot));
+			Assert.That(_connectionTree.FilteredObjects, Does.Contain(puttySession));
+			Assert.That(_connectionTree.NodeSearcher.SearchByName("putty-session"), Contains.Item(puttySession));
+		}
+
+	    [Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void DuplicatingWithNoNodeSelectedDoesNothing()
+	    {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var puttyRoot = new RootNodeInfo(RootNodeType.PuttySessions);
+	        connectionTreeModel.AddRootNode(puttyRoot);
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+
+			_connectionTree.SelectedObject = null;
+	        _connectionTree.DuplicateSelectedNode();
+
+	        Assert.That(connectionTreeModel.RootNodes, Has.One.Items);
+	    }
+
+	    [Test]
+	    [Apartment(ApartmentState.STA)]
+	    public void ExpandingAllItemsUpdatesColumnWidthAppropriately()
+	    {
+            var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+            connectionTreeModel.AddRootNode(root);
+	        ContainerInfo parent = root;
+	        foreach (var i in Enumerable.Repeat("", 8))
+	        {
+                var newContainer = new ContainerInfo {IsExpanded = false};
+                parent.AddChild(newContainer);
+	            parent = newContainer;
+	        }
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+
+	        var widthBefore = _connectionTree.Columns[0].Width;
+	        _connectionTree.ExpandAll();
+            var widthAfter = _connectionTree.Columns[0].Width;
+
+            Assert.That(widthAfter, Is.GreaterThan(widthBefore));
+	    }
+
+        [Test]
+        [Apartment(ApartmentState.STA)]
+        public void RenamingNodeWithNothingSelectedDoesNothing()
+	    {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+	        connectionTreeModel.AddRootNode(root);
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+			_connectionTree.SelectedObject = null;
+
+	        Assert.DoesNotThrow(() => _connectionTree.RenameSelectedNode());
+        }
+
+        [Test]
+        [Apartment(ApartmentState.STA)]
+        public void CopyHostnameCopiesTheHostnameOfTheSelectedConnection()
+        {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+			var con1 = new ConnectionInfo {Hostname = "MyHost"};
+			root.AddChild(con1);
+			connectionTreeModel.AddRootNode(root);
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.ExpandAll();
+	        _connectionTree.SelectedObject = con1;
+
+	        var clipboard = Substitute.For<IClipboard>();
+			_connectionTree.CopyHostnameSelectedNode(clipboard);
+			clipboard.Received(1).SetText(con1.Hostname);
+        }
+
+        [Test]
+        [Apartment(ApartmentState.STA)]
+        public void CopyHostnameCopiesTheNodeNameOfTheSelectedContainer()
+        {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+	        var container = new ContainerInfo { Name = "MyFolder" };
+	        root.AddChild(container);
+	        connectionTreeModel.AddRootNode(root);
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+			_connectionTree.SelectedObject = container;
+
+	        var clipboard = Substitute.For<IClipboard>();
+			_connectionTree.CopyHostnameSelectedNode(clipboard);
+			clipboard.Received(1).SetText(container.Name);
+		}
+
+        [Test]
+        [Apartment(ApartmentState.STA)]
+        public void CopyHostnameDoesNotCopyAnythingIfNoNodeSelected()
+        {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+	        var con1 = new ConnectionInfo { Hostname = "MyHost" };
+	        root.AddChild(con1);
+	        connectionTreeModel.AddRootNode(root);
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+			_connectionTree.SelectedObject = null;
+
+			var clipboard = Substitute.For<IClipboard>();
+			_connectionTree.CopyHostnameSelectedNode(clipboard);
+			clipboard.DidNotReceiveWithAnyArgs().SetText("");
+        }
+
+        [Test]
+        [Apartment(ApartmentState.STA)]
+        public void CopyHostnameDoesNotCopyAnythingIfHostnameOfSelectedConnectionIsEmpty()
+        {
+	        var connectionTreeModel = new ConnectionTreeModel();
+	        var root = new RootNodeInfo(RootNodeType.Connection);
+	        var con1 = new ConnectionInfo { Hostname = string.Empty };
+	        root.AddChild(con1);
+	        connectionTreeModel.AddRootNode(root);
+
+	        _connectionTree.ConnectionTreeModel = connectionTreeModel;
+	        _connectionTree.ExpandAll();
+			_connectionTree.SelectedObject = con1;
+
+	        var clipboard = Substitute.For<IClipboard>();
+			_connectionTree.CopyHostnameSelectedNode(clipboard);
+			clipboard.DidNotReceiveWithAnyArgs().SetText("");
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void CopyHostnameDoesNotCopyAnythingIfNameOfSelectedContainerIsEmpty()
+		{
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var con1 = new ContainerInfo { Name = string.Empty};
+			root.AddChild(con1);
+			connectionTreeModel.AddRootNode(root);
+
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.ExpandAll();
+			_connectionTree.SelectedObject = con1;
+
+			var clipboard = Substitute.For<IClipboard>();
+			_connectionTree.CopyHostnameSelectedNode(clipboard);
+			clipboard.DidNotReceiveWithAnyArgs().SetText("");
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void ExpandingLargeContainerCompletesAndShowsAllChildren()
+		{
+			mRemoteNG.Properties.OptionsAppearancePage.Default.EnableConnectionTreeAnimations = false;
+			var (root, parent, children) = CreateTreeWithChildren(150);
+
+			Assert.That(_connectionTree.IsExpanded(parent), Is.False);
+
+			_connectionTree.InvokeExpand(parent);
+
+			Assert.That(parent.Children, Has.Count.EqualTo(children.Count));
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void CollapseRequestDuringExpandCompletesCollapseWithoutStaleState()
+		{
+			mRemoteNG.Properties.OptionsAppearancePage.Default.EnableConnectionTreeAnimations = false;
+			var (root, parent, children) = CreateTreeWithChildren(120);
+
+			_connectionTree.InvokeExpand(parent);
+
+			_connectionTree.Collapse(parent);
+
+			Assert.That(_connectionTree.IsExpanded(parent), Is.False);
+			Assert.That(parent.Children, Has.Count.EqualTo(children.Count));
+
+			_connectionTree.InvokeExpand(parent);
+			Assert.That(parent.Children, Has.Count.EqualTo(children.Count));
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void DisabledAnimationsExpandAndCollapseImmediately()
+		{
+			mRemoteNG.Properties.OptionsAppearancePage.Default.EnableConnectionTreeAnimations = false;
+			var (root, parent, children) = CreateTreeWithChildren(40);
+
+			_connectionTree.InvokeExpand(parent);
+			Assert.That(parent.Children, Has.Count.EqualTo(children.Count));
+
+			_connectionTree.Collapse(parent);
+
+			Assert.That(_connectionTree.IsExpanded(parent), Is.False);
+			Assert.That(parent.Children, Has.Count.EqualTo(children.Count));
+		}
+
+		[Test]
+		[Apartment(ApartmentState.STA)]
+		public void ProgrammaticExpandWithoutAnimationPreservesNewNodeSelectionAndVisibility()
+		{
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var parent = new ContainerInfo { Name = "parent" };
+			root.AddChild(parent);
+			connectionTreeModel.AddRootNode(root);
+
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+			_connectionTree.ExpandAll();
+			_connectionTree.SelectedObject = parent;
+
+			_connectionTree.AddConnection();
+
+			Assert.That(parent.Children, Has.Count.EqualTo(1));
+			Assert.That(_connectionTree.SelectedNode, Is.EqualTo(parent.Children[0]));
+			Assert.That(_connectionTree.GetChildren(parent), Has.Count.EqualTo(1));
+		}
+
+		private (RootNodeInfo root, ContainerInfo parent, List<ConnectionInfo> children) CreateTreeWithChildren(int childCount)
+		{
+			var connectionTreeModel = new ConnectionTreeModel();
+			var root = new RootNodeInfo(RootNodeType.Connection);
+			var parent = new ContainerInfo { Name = "parent" };
+			root.AddChild(parent);
+
+			var children = new List<ConnectionInfo>();
+			for (int i = 0; i < childCount; i++)
+			{
+				var child = new ConnectionInfo { Name = $"child-{i}" };
+				parent.AddChild(child);
+				children.Add(child);
+			}
+
+			connectionTreeModel.AddRootNode(root);
+			_connectionTree.ConnectionTreeModel = connectionTreeModel;
+
+			return (root, parent, children);
+		}
+
+		private static void WaitUntil(System.Func<bool> condition, int timeoutMs = 2000)
+		{
+			int elapsed = 0;
+			while (!condition() && elapsed < timeoutMs)
+			{
+				Application.DoEvents();
+				Thread.Sleep(10);
+				elapsed += 10;
+			}
+
+			Assert.That(condition(), Is.True, "Timed out waiting for expected UI state.");
+		}
+	}
+}

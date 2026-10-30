@@ -1,0 +1,44 @@
+﻿<#@ import namespace="System" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Reflection" #>
+
+<# 
+    string platformFromDte = null;
+
+    try {
+        string repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Host.TemplateFile), @"..\"));
+        string dllPath = Path.Combine(repoRoot, @"libs\Microsoft.VisualStudio.Interop.dll");
+        if (File.Exists(dllPath)) {
+            Assembly.LoadFrom(dllPath);
+            var sp = Host as IServiceProvider;
+            if (sp != null) {
+                // Use reflection to avoid compile-time dependency on EnvDTE
+                var envDteAsm = AppDomain.CurrentDomain.GetAssemblies();
+                Type dteType = null;
+                foreach (var asm in envDteAsm) {
+                    dteType = asm.GetType("EnvDTE.DTE");
+                    if (dteType != null) break;
+                }
+                if (dteType != null) {
+                    var dte = sp.GetService(dteType);
+                    if (dte != null) {
+                        var solution = dteType.GetProperty("Solution")?.GetValue(dte);
+                        var findItem = solution?.GetType().GetMethod("FindProjectItem", new[] { typeof(string) });
+                        var projectItem = findItem?.Invoke(solution, new object[] { Host.TemplateFile });
+                        var project = projectItem?.GetType().GetProperty("ContainingProject")?.GetValue(projectItem);
+                        var cfgMgr = project?.GetType().GetProperty("ConfigurationManager")?.GetValue(project);
+                        var activeCfg = cfgMgr?.GetType().GetProperty("ActiveConfiguration")?.GetValue(cfgMgr);
+                        platformFromDte = activeCfg?.GetType().GetProperty("PlatformName")?.GetValue(activeCfg) as string;
+                    }
+                }
+            }
+        } 
+    } catch {
+        // Fallback to environment variables below
+    }
+
+    platformValue = platformFromDte 
+                 ?? Environment.GetEnvironmentVariable("Platform") 
+                 ?? Environment.GetEnvironmentVariable("PLATFORM") 
+                 ?? "Any CPU";
+#>

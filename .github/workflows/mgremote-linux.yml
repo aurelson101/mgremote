@@ -1,0 +1,54 @@
+name: MGRemote Linux validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Linux build and display dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y squashfs-tools xvfb xauth libx11-6 libice6 libsm6 libfontconfig1 libxrandr2 libxi6 libxcursor1 libxrender1 libgl1 libxkbcommon0 libdbus-1-3
+      - name: Offline security and import checks
+        run: dotnet run --project Linux/MGRemote.Linux.csproj -- --self-test
+      - name: Build AppImage
+        shell: pwsh
+        run: ./Linux/Build-AppImage.ps1 -SquashfsTool /usr/bin/mksquashfs
+      - name: Execute the packaged AppImage and render the Linux UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=$(find artifacts/linux/0.1.1 -type f -name '*.AppImage' -print -quit)
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          "$image" --self-test
+          xvfb-run -a "$image" --smoke-ui="$GITHUB_WORKSPACE/artifacts/linux-gui.png"
+          python3 - <<'PY'
+          import json,pathlib,hashlib
+          folder=next(pathlib.Path('artifacts/linux/0.1.1').iterdir())
+          path=folder/'manifest.json'
+          data=json.loads(path.read_text(encoding='utf-8-sig'))
+          image=folder/data['AppImage']
+          assert hashlib.sha256(image.read_bytes()).hexdigest().upper()==data['SHA256']
+          data['LinuxExecutionTested']=True
+          data['LinuxTestEnvironment']='Ubuntu 24.04 x86-64, Xvfb; extracted AppImage runtime'
+          path.write_text(json.dumps(data,indent=2)+'\n')
+          PY
+      - name: Upload validated packages and screenshot
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mgremote-linux-validated
+          path: |
+            artifacts/linux/0.1.1/*/*.AppImage
+            artifacts/linux/0.1.1/*/*-source.zip
+            artifacts/linux/0.1.1/*/manifest.json
+            artifacts/linux-gui.png
+          if-no-files-found: error

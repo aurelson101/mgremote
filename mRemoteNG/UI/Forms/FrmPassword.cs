@@ -1,0 +1,166 @@
+﻿using System;
+using System.Security;
+using System.Windows.Forms;
+using mRemoteNG.Security;
+using mRemoteNG.Themes;
+using mRemoteNG.Tools;
+using mRemoteNG.Resources.Language;
+using System.Runtime.Versioning;
+
+namespace mRemoteNG.UI.Forms
+{
+    [SupportedOSPlatform("windows")]
+    public partial class FrmPassword : IKeyProvider
+    {
+        private readonly string _passwordName;
+        private SecureString _password = new();
+
+        /// <summary>
+        /// Puts the dialog into the New Password mode. An extra
+        /// password box is shown which must match the first password
+        /// to continue.
+        /// </summary>
+        private bool NewPasswordMode { get; }
+
+        /// <summary>
+        /// Creates a new password form for entering or setting a password.
+        /// </summary>
+        /// <param name="passwordName"></param>
+        /// <param name="newPasswordMode">
+        /// Puts the dialog into the New Password mode. An extra
+        /// password box is shown which must match the first password
+        /// to continue.
+        /// </param>
+        public FrmPassword(string? passwordName = null, bool newPasswordMode = true)
+        {
+            InitializeComponent();
+            _passwordName = passwordName;
+            NewPasswordMode = newPasswordMode;
+        }
+
+        /// <summary>
+        /// Dispaly a dialog box requesting that the user 
+        /// enter their password.
+        /// </summary>
+        /// <returns></returns>
+        public Optional<SecureString> GetKey() => GetKey(null);
+
+        public Optional<SecureString> GetKey(IWin32Window? owner)
+        {
+            DialogResult dialog = owner == null
+                ? ShowDialog()
+                : ShowDialog(owner);
+            return dialog == DialogResult.OK
+                ? _password
+                : Optional<SecureString>.Empty;
+        }
+
+        #region Event Handlers
+
+        private void FrmPassword_Load(object sender, EventArgs e)
+        {
+            ApplyLanguage();
+            ApplyTheme();
+            DisplayProperties display = new();
+            pbLock.Image = display.ScaleImage(pbLock.Image);
+            Height = tableLayoutPanel1.Height;
+
+            if (NewPasswordMode)
+            {
+                txtPassword.Focus();
+                return;
+            }
+            lblVerify.Visible = false;
+            txtVerify.Visible = false;
+            txtPassword.Focus();
+        }
+
+        private void PasswordForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            _password = txtPassword.Text.ConvertToSecureString();
+            txtPassword.Text = "";
+            txtVerify.Text = "";
+        }
+
+        private void BtnCancel_Click(object sender, EventArgs e)
+        {
+            DialogResult = DialogResult.Cancel;
+            Close();
+        }
+
+        private void BtnOK_Click(object sender, EventArgs e)
+        {
+            if (NewPasswordMode && !VerifyNewPassword())
+                return;
+
+            DialogResult = DialogResult.OK;
+        }
+
+        private void TxtPassword_TextChanged(object sender, EventArgs e)
+        {
+            HideStatus();
+        }
+
+        #endregion
+
+        #region Private Methods
+
+        private void ApplyLanguage()
+        {
+            Text = string.IsNullOrEmpty(_passwordName)
+                ? Language.TitlePassword
+                : string.Format(Language.TitlePasswordWithName, _passwordName);
+
+            lblPassword.Text = Language.Password;
+            lblVerify.Text = Language.Verify;
+            btnCancel.Text = Language._Cancel;
+            btnOK.Text = Language._Ok;
+        }
+
+        // Apply the dark/light title bar before the window is shown to avoid a white flash.
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            ThemeManager.getInstance().ApplyThemeToTitleBar(this);
+        }
+
+        private void ApplyTheme()
+        {
+            ThemeManager.getInstance().ApplyThemeToTitleBar(this);
+            if (!ThemeManager.getInstance().ActiveAndExtended)
+                return;
+
+            ThemeInfo activeTheme = ThemeManager.getInstance().ActiveTheme;
+
+            BackColor = activeTheme.ExtendedPalette.getColor("Dialog_Background");
+            ForeColor = activeTheme.ExtendedPalette.getColor("Dialog_Foreground");
+        }
+
+        private bool VerifyNewPassword()
+        {
+            if (txtPassword.Text.Length >= 3)
+            {
+                if (txtPassword.Text == txtVerify.Text)
+                    return true;
+                ShowStatus(Language.PasswordStatusMustMatch);
+                return false;
+            }
+
+            ShowStatus(Language.PasswordStatusTooShort);
+            return false;
+        }
+
+        private void ShowStatus(string status)
+        {
+            lblStatus.Visible = true;
+            lblStatus.Text = status;
+        }
+
+        private void HideStatus()
+        {
+            lblStatus.Visible = false;
+        }
+
+        #endregion
+    }
+}

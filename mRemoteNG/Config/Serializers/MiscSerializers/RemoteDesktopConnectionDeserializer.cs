@@ -1,0 +1,241 @@
+﻿using System;
+using System.Runtime.Versioning;
+using mRemoteNG.Connection;
+using mRemoteNG.Connection.Protocol.RDP;
+using mRemoteNG.Tree;
+using mRemoteNG.Tree.Root;
+
+namespace mRemoteNG.Config.Serializers.MiscSerializers
+{
+    [SupportedOSPlatform("windows")]
+    public class RemoteDesktopConnectionDeserializer : IDeserializer<string, ConnectionTreeModel>
+    {
+        // .rdp file schema: https://technet.microsoft.com/en-us/library/ff393699(v=ws.10).aspx
+
+        public ConnectionTreeModel Deserialize(string rdcFileContent)
+        {
+            ConnectionTreeModel connectionTreeModel = new();
+            RootNodeInfo root = new(RootNodeType.Connection);
+            connectionTreeModel.AddRootNode(root);
+            ConnectionInfo connectionInfo = new();
+            bool promptCredentialOnce = false;
+            foreach (string line in rdcFileContent.Split(Environment.NewLine.ToCharArray()))
+            {
+                string[] parts = line.Split(new[] { ':' }, 3);
+                if (parts.Length < 3)
+                {
+                    continue;
+                }
+
+                string key = parts[0].Trim();
+                string value = parts[2].Trim();
+
+                if (key.Equals("promptcredentialonce", StringComparison.OrdinalIgnoreCase))
+                    promptCredentialOnce = value == "1";
+
+                SetConnectionInfoParameter(connectionInfo, key, value);
+            }
+
+            // "Prompt once" means the gateway takes the same logon as the computer behind it.
+            // RD Web Access writes it next to gatewaycredentialssource:i:4, which on its own reads
+            // as "enter the gateway credentials manually".
+            if (promptCredentialOnce && connectionInfo.RDGatewayUseConnectionCredentials == RDGatewayUseConnectionCredentials.No)
+                connectionInfo.RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.Yes;
+
+            root.AddChild(connectionInfo);
+
+            return connectionTreeModel;
+        }
+
+
+        private void SetConnectionInfoParameter(ConnectionInfo connectionInfo, string key, string value)
+        {
+            switch (key.ToLower())
+            {
+                case "full address":
+                    // A bare IPv6 address has colons of its own and cannot carry a port; Uri reads
+                    // its last group as an invalid port and throws, failing the whole import.
+                    if (value.IndexOf(':') != value.LastIndexOf(':') && !value.StartsWith("[", StringComparison.Ordinal))
+                    {
+                        connectionInfo.Hostname = value;
+                        break;
+                    }
+                    Uri uri = new("dummyscheme" + Uri.SchemeDelimiter + value);
+                    if (!string.IsNullOrEmpty(uri.Host))
+                        connectionInfo.Hostname = uri.Host;
+                    if (uri.Port != -1)
+                        connectionInfo.Port = uri.Port;
+                    break;
+                case "server port":
+                    connectionInfo.Port = Convert.ToInt32(value);
+                    break;
+                case "username":
+                    connectionInfo.Username = value;
+                    break;
+                case "domain":
+                    connectionInfo.Domain = value;
+                    break;
+                case "session bpp":
+                    switch (value)
+                    {
+                        case "8":
+                            connectionInfo.Colors = RDPColors.Colors256;
+                            break;
+                        case "15":
+                            connectionInfo.Colors = RDPColors.Colors15Bit;
+                            break;
+                        case "16":
+                            connectionInfo.Colors = RDPColors.Colors16Bit;
+                            break;
+                        case "24":
+                            connectionInfo.Colors = RDPColors.Colors24Bit;
+                            break;
+                        case "32":
+                            connectionInfo.Colors = RDPColors.Colors32Bit;
+                            break;
+                    }
+                    break;
+                case "bitmapcachepersistenable":
+                    connectionInfo.CacheBitmaps = value == "1";
+                    break;
+                case "screen mode id":
+                    connectionInfo.Resolution = value == "2"
+                        ? RDPResolutions.Fullscreen
+                        : RDPResolutions.SmartSize;
+                    break;
+                case "connect to console":
+                case "administrative session":
+                    connectionInfo.UseConsoleSession = value == "1";
+                    break;
+                case "authentication level":
+                    switch (value)
+                    {
+                        case "0":
+                            connectionInfo.RDPAuthenticationLevel = AuthenticationLevel.NoAuth;
+                            break;
+                        case "1":
+                            connectionInfo.RDPAuthenticationLevel = AuthenticationLevel.AuthRequired;
+                            break;
+                        case "2":
+                            connectionInfo.RDPAuthenticationLevel = AuthenticationLevel.WarnOnFailedAuth;
+                            break;
+                    }
+                    break;
+                case "enablecredsspsupport":
+                    connectionInfo.UseCredSsp = value == "1";
+                    break;
+                case "disable wallpaper":
+                    connectionInfo.DisplayWallpaper = value == "1";
+                    break;
+                case "disable themes":
+                    connectionInfo.DisplayThemes = value == "1";
+                    break;
+                case "allow font smoothing":
+                    connectionInfo.EnableFontSmoothing = value == "1";
+                    break;
+                case "allow desktop composition":
+                    connectionInfo.EnableDesktopComposition = value == "1";
+                    break;
+                case "keyboardhook":
+                    connectionInfo.RedirectKeys = value == "1";
+                    break;
+                case "redirectsmartcards":
+                    connectionInfo.RedirectSmartCards = value == "1";
+                    break;
+                case "redirectdrives":
+                    connectionInfo.RedirectDiskDrives = (value == "1" ? RDPDiskDrives.Local : RDPDiskDrives.None);
+                    break;
+                case "redirectdrivescustom":
+                    connectionInfo.RedirectDiskDrivesCustom = value;
+                    break;
+                case "redirectcomports":
+                    connectionInfo.RedirectPorts = value == "1";
+                    break;
+                case "redirectprinters":
+                    connectionInfo.RedirectPrinters = value == "1";
+                    break;
+                case "redirectclipboard":
+                    connectionInfo.RedirectClipboard = value == "1";
+                    break;
+                case "audiomode":
+                    switch (value)
+                    {
+                        case "0":
+                            connectionInfo.RedirectSound = RDPSounds.BringToThisComputer;
+                            break;
+                        case "1":
+                            connectionInfo.RedirectSound = RDPSounds.LeaveAtRemoteComputer;
+                            break;
+                        case "2":
+                            connectionInfo.RedirectSound = RDPSounds.DoNotPlay;
+                            break;
+                    }
+                    break;
+                case "redirectaudiocapture":
+                    connectionInfo.RedirectAudioCapture = value == "1";
+                    break;
+                case "loadbalanceinfo":
+                    connectionInfo.LoadBalanceInfo = value;
+                    break;
+                case "gatewayusagemethod":
+                    switch (value)
+                    {
+                        case "0":
+                            connectionInfo.RDGatewayUsageMethod = RDGatewayUsageMethod.Never;
+                            break;
+                        case "1":
+                            connectionInfo.RDGatewayUsageMethod = RDGatewayUsageMethod.Always;
+                            break;
+                        case "2":
+                            connectionInfo.RDGatewayUsageMethod = RDGatewayUsageMethod.Detect;
+                            break;
+                        case "4":
+                            // Don't use a gateway, and bypass it for local addresses
+                            connectionInfo.RDGatewayUsageMethod = RDGatewayUsageMethod.Never;
+                            break;
+                    }
+                    break;
+                case "gatewayhostname":
+                    connectionInfo.RDGatewayHostname = value;
+                    break;
+                case "gatewaycredentialssource":
+                    switch(value)
+                    {
+                        case "0":
+                            connectionInfo.RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.ExternalCredentialProvider;
+                            break;
+                        case "1":
+                            connectionInfo.RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.SmartCard;
+                            break;
+                        case "2":
+                            connectionInfo.RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.Yes;
+                            break;
+                        case "3":
+                            // Both 3 and 4 require that the user enter gateway credentials manually
+                            connectionInfo.RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.No;
+                            break;
+                        case "4":
+                            // Both 3 and 4 require that the user enter gateway credentials manually
+                            connectionInfo.RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.No;
+                            break;
+                        case "5":
+                            connectionInfo.RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.AccessToken;
+                            break;
+                    }
+                    break;
+                case "gatewayusername":
+                    connectionInfo.RDGatewayUsername = value;
+                    break;
+                case "gatewaydomain":
+                    connectionInfo.RDGatewayDomain = value;
+                    break;
+                case "gatewayaccesstoken":
+                    connectionInfo.RDGatewayAccessToken = value;
+                    break;
+                case "alternate shell":
+                    connectionInfo.RDPStartProgram = value;
+                    break;
+            }
+        }
+    }
+}

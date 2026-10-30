@@ -1,0 +1,6 @@
+{
+  "Package": "@xterm/xterm",
+  "Version": "6.0.0",
+  "Integrity": "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==",
+  "Tarball": "https://registry.npmjs.org/@xterm/xterm/-/xterm-6.0.0.tgz"
+}

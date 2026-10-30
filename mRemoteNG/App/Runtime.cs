@@ -1,0 +1,271 @@
+﻿using mRemoteNG.App.Info;
+using mRemoteNG.Config.Putty;
+using mRemoteNG.Connection;
+using mRemoteNG.Credential;
+using mRemoteNG.Credential.Repositories;
+using mRemoteNG.Messages;
+using mRemoteNG.Plugins;
+using mRemoteNG.Security;
+using mRemoteNG.Tools;
+using mRemoteNG.Tree.Root;
+using mRemoteNG.UI;
+using mRemoteNG.UI.Forms;
+using mRemoteNG.UI.TaskDialog;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Security;
+using System.Threading;
+using System.Windows.Forms;
+using System.Linq;
+using mRemoteNG.Config.Settings;
+using mRemoteNG.Config.UserProfiles;
+using mRemoteNG.Security.Factories;
+using mRemoteNG.Properties;
+using mRemoteNG.Resources.Language;
+using System.Runtime.Versioning;
+
+namespace mRemoteNG.App
+{
+    [SupportedOSPlatform("windows")]
+    public static class Runtime
+    {
+        public static bool IsPortableEdition
+        {
+            get
+            {
+#if PORTABLE
+                return true;
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// Feature flag to enable the credential manager feature
+        /// </summary>
+        public static bool UseCredentialManager => false;
+
+        public static WindowList WindowList { get; set; } = new(); // MGRemote 2026-10-29: initialize before layout creates panels
+        public static MessageCollector MessageCollector { get; } = new MessageCollector();
+        public static NotificationAreaIcon NotificationAreaIcon { get; set; } = null!; // initialized on demand by settings/UI
+        public static ExternalToolsService ExternalToolsService { get; } = new ExternalToolsService();
+        public static PluginService PluginService { get; } = new PluginService();
+
+        public static SecureString EncryptionKey { get; set; } = new RootNodeInfo(RootNodeType.Connection).PasswordString.ConvertToSecureString();
+
+        public static ICredentialRepositoryList CredentialProviderCatalog { get; } = new CredentialRepositoryList();
+
+        public static ConnectionInitiator ConnectionInitiator { get; set; } = new ConnectionInitiator();
+
+        public static ConnectionsService ConnectionsService { get; } = new ConnectionsService(PuttySessionsManager.Instance);
+        public static SqliteUserProfileStore UserProfileStore { get; private set; }
+        public static UserProfileSession UserProfileSession { get; private set; }
+
+        /// <summary>
+        /// Dev-only options repository manager. Only initialized in DEBUG builds.
+        /// </summary>
+        public static OptionsRepositoryManager OptionsRepositoryManager { get; set; } = new();
+
+        #region Connections Loading/Saving
+
+        public static bool TryInitializeUserProfile()
+        {
+            string profilesPath = SettingsFileInfo.SettingsPath;
+            string databasePath = Path.Combine(profilesPath, SqliteUserProfileStore.DatabaseFileName);
+            Optional<SecureString> passwordResult = MiscTools.PasswordDialog("Profile password", true);
+            if (!passwordResult.Any())
+                return false;
+            SecureString password = passwordResult.First();
+
+            try
+            {
+                UserProfileStore = new SqliteUserProfileStore(
+                    profilesPath,
+                    File.Exists(databasePath) ? null : password);
+                UserProfile user = UserProfileStore.EnsureFirstRunUsers(Environment.UserName);
+                UserProfileSession administratorSession = UserProfileStore.Authenticate("Admin", password);
+                if (administratorSession is not null && !user.HasPassword)
+                    UserProfileStore.SetInitialUserPassword(administratorSession, user.Id, password);
+                UserProfileSession session = UserProfileStore.Authenticate(user.UserName, password);
+                if (session is null)
+                    return false;
+
+                IReadOnlyList<ConnectionProfile> profiles = UserProfileStore.GetProfiles(session);
+                if (profiles.Count == 0)
+                {
+                    string defaultProfilePath = Path.Combine(profilesPath, "connections.profile.db");
+                    profiles = new[] { UserProfileStore.AddProfile(session, "Default", defaultProfilePath) };
+                }
+                ConnectionProfile profile = ProfileSelectionDialog.Select(profiles);
+                if (profile is null)
+                    return false;
+                UserProfileSession = session;
+                ConnectionsService.ProfileDataProvider = UserProfileStore.OpenProfile(
+                    session,
+                    profile.Id,
+                    new CryptoProviderFactoryFromSettings().Build(),
+                    password);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageCollector.AddExceptionMessage("Could not initialize user profiles.", ex);
+                UserProfileStore?.Dispose();
+                UserProfileStore = null;
+                return false;
+            }
+        }
+
+        public static void LoadConnectionsAsync()
+        {
+            Thread t = new(LoadConnectionsBGd);
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+        }
+
+        private static void LoadConnectionsBGd()
+        {
+            LoadConnections();
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="withDialog">
+        /// Should we show the file selection dialog to allow the user to select
+        /// a connection file
+        /// </param>
+        public static void LoadConnections(bool withDialog = false)
+        {
+            string connectionFileName = "";
+
+            try
+            {
+                // disable sql update checking while we are loading updates
+                ConnectionsService.RemoteConnectionsSyncronizer?.Disable();
+
+                if (withDialog)
+                {
+                    OpenFileDialog loadDialog = DialogFactory.BuildLoadConnectionsDialog();
+                    if (loadDialog.ShowDialog() != DialogResult.OK)
+                        return;
+
+                    connectionFileName = loadDialog.FileName;
+                    Properties.OptionsDBsPage.Default.UseSQLServer = false;
+                    Properties.OptionsDBsPage.Default.Save();
+                }
+                else if (!Properties.OptionsDBsPage.Default.UseSQLServer)
+                {
+                    connectionFileName = ConnectionsService.GetStartupConnectionFileName();
+                }
+
+                ConnectionsService.LoadConnections(Properties.OptionsDBsPage.Default.UseSQLServer, false, connectionFileName);
+
+                if (Properties.OptionsDBsPage.Default.UseSQLServer)
+                {
+                    ConnectionsService.LastSqlUpdate = DateTime.Now.ToUniversalTime();
+                } 
+				else if (ConnectionsService.ProfileDataProvider is null)
+                {
+                    ConnectionsService.LastFileUpdate =  System.IO.File.GetLastWriteTime(connectionFileName);
+                }
+
+                // re-enable sql update checking after updates are loaded
+                ConnectionsService.RemoteConnectionsSyncronizer?.Enable();
+            }
+            catch (Exception ex)
+            {
+                ProgramRoot.CloseSplash();
+
+                if (Properties.OptionsDBsPage.Default.UseSQLServer)
+                {
+                    MessageCollector.AddExceptionMessage(Language.LoadFromSqlFailed, ex);
+                    string commandButtons = string.Join("|", Language._TryAgain, Language.CommandOpenConnectionFile, string.Format(Language.CommandExitProgram, Application.ProductName));
+                    CTaskDialog.ShowCommandBox(Application.ProductName ?? string.Empty, Language.LoadFromSqlFailed, Language.LoadFromSqlFailedContent, MiscTools.GetExceptionMessageRecursive(ex), "", "", commandButtons, false, ESysIcons.Error, ESysIcons.Error);
+                    switch (CTaskDialog.CommandButtonResult)
+                    {
+                        case 0:
+                            LoadConnections(withDialog);
+                            return;
+                        case 1:
+                            Properties.OptionsDBsPage.Default.UseSQLServer = false;
+                            LoadConnections(true);
+                            return;
+                        default:
+                            Application.Exit();
+                            return;
+                    }
+                }
+
+                if (ex is FileNotFoundException && !withDialog)
+                {
+                    MessageCollector.AddExceptionMessage(
+                                                         string.Format(Language.ConnectionsFileCouldNotBeLoadedNew,
+                                                                       connectionFileName), ex,
+                                                         MessageClass.InformationMsg);
+
+                    string[] commandButtons =
+                    {
+                        Language.ConfigurationCreateNew,
+                        Language.ConfigurationCustomPath,
+                        Language.ConfigurationImportFile,
+                        Language.Exit
+                    };
+
+                    bool answered = false;
+                    while (!answered)
+                    {
+                        try
+                        {
+                            CTaskDialog.ShowTaskDialogBox(GeneralAppInfo.ProductName ?? string.Empty, Language.ConnectionFileNotFound, "", "", "", "", "", string.Join(" | ", commandButtons), ETaskDialogButtons.None, ESysIcons.Question, ESysIcons.Question);
+
+                            switch (CTaskDialog.CommandButtonResult)
+                            {
+                                case 0:
+                                    ConnectionsService.NewConnectionsFile(connectionFileName);
+                                    answered = true;
+                                    break;
+                                case 1:
+                                    LoadConnections(true);
+                                    answered = true;
+                                    break;
+                                case 2:
+                                    ConnectionsService.NewConnectionsFile(connectionFileName);
+                                    Import.ImportFromFile(ConnectionsService.ConnectionTreeModel.RootNodes[0]);
+                                    answered = true;
+                                    break;
+                                case 3:
+                                    Application.Exit();
+                                    answered = true;
+                                    break;
+                            }
+                        }
+                        catch (Exception exc)
+                        {
+                            MessageCollector.AddExceptionMessage(string.Format(Language.ConnectionsFileCouldNotBeLoadedNew, connectionFileName), exc, MessageClass.InformationMsg);
+                        }
+                    }
+
+                    return;
+                }
+
+                MessageCollector.AddExceptionStackTrace(
+                                                        string.Format(Language.ConnectionsFileCouldNotBeLoaded,
+                                                                      connectionFileName), ex);
+                if (connectionFileName != ConnectionsService.GetStartupConnectionFileName())
+                {
+                    LoadConnections(withDialog);
+                }
+                else
+                {
+                    MessageBox.Show(FrmMain.Default, string.Format(Language.ErrorStartupConnectionFileLoad, Environment.NewLine, Application.ProductName, ConnectionsService.GetStartupConnectionFileName(), MiscTools.GetExceptionMessageRecursive(ex)), @"Could not load startup file.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Application.Exit();
+                }
+            }
+        }
+
+        #endregion
+    }
+}

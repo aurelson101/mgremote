@@ -1,0 +1,990 @@
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Drawing;
+using System.Linq;
+using System.Windows.Forms;
+using mRemoteNG.App;
+using mRemoteNG.App.Info;
+using mRemoteNG.Config;
+using mRemoteNG.Connection;
+using mRemoteNG.Connection.Protocol;
+using mRemoteNG.Connection.Protocol.RDP;
+using mRemoteNG.Connection.Protocol.VNC;
+using mRemoteNG.Messages;
+using mRemoteNG.Properties;
+using mRemoteNG.Themes;
+using mRemoteNG.Tools;
+using mRemoteNG.UI.Forms;
+using mRemoteNG.UI.Panels;
+using mRemoteNG.UI.Tabs;
+using mRemoteNG.UI.TaskDialog;
+using mRemoteNG.UI.Controls;
+using WeifenLuo.WinFormsUI.Docking;
+using mRemoteNG.Resources.Language;
+using System.Runtime.Versioning;
+using mRemoteNG.Security;
+
+namespace mRemoteNG.UI.Window
+{
+    [SupportedOSPlatform("windows")]
+    public partial class ConnectionWindow : BaseWindow
+    {
+        private VisualStudioToolStripExtender _vsToolStripExtender;
+        private bool _themeSubscribed;
+        private readonly HashSet<ThemeBase> _menuThemes = new();
+        private readonly ToolStripRenderer _toolStripProfessionalRenderer = new ToolStripProfessionalRenderer();
+        private static readonly Font GeneralPanelHeaderFont = new(SystemFonts.MessageBoxFont.FontFamily, SystemFonts.MessageBoxFont.Size + 2f, FontStyle.Bold);
+
+        public bool IsGeneralPanel => string.Equals(TabText, PanelAdder.DefaultPanelName, StringComparison.OrdinalIgnoreCase);
+
+        #region Public Methods
+
+        public ConnectionWindow(DockContent panel, string formText = "")
+        {
+            if (formText == "")
+            {
+                formText = Language.NewPanel;
+            }
+
+            WindowType = WindowType.Connection;
+            DockPnl = panel;
+            InitializeComponent();
+            SetEventHandlers();
+            // ReSharper disable once VirtualMemberCallInConstructor
+            Text = formText;
+            TabText = formText;
+            CloseButton = !IsGeneralPanel;
+            CloseButtonVisible = !IsGeneralPanel;
+            connDock.DocumentStyle = DocumentStyle.DockingWindow;
+            connDock.ShowDocumentIcon = true;
+
+            connDock.ActiveContentChanged += ConnDockOnActiveContentChanged;
+        }
+
+        // MGRemote 2026-10-29: release singleton event roots and this derived form's container.
+        protected override void Dispose(bool disposing)
+        {
+            try
+            {
+                if (disposing)
+                {
+                    if (_themeSubscribed)
+                    {
+                        ThemeManager.getInstance().ThemeChanged -= ApplyTheme;
+                        _themeSubscribed = false;
+                    }
+                    DetachResizeHandlers();
+                    // The tab menu is created outside the designer's component container.
+                    var tabMenu = TabPageContextMenuStrip;
+                    TabPageContextMenuStrip = null;
+                    foreach (var theme in _menuThemes)
+                    {
+                        DesktopAppearance.ReleaseThemedMenu(theme, cmenTab);
+                        DesktopAppearance.ReleaseThemedMenu(theme, tabMenu);
+                    }
+                    _menuThemes.Clear();
+                    tabMenu?.Dispose();
+                    DockPnl?.Dispose();
+                    DockPnl = null;
+                    if (Runtime.WindowList != null && Runtime.WindowList.OfType<ConnectionWindow>().Contains(this))
+                        Runtime.WindowList.Remove(this);
+                    components?.Dispose();
+                }
+            }
+            finally { base.Dispose(disposing); }
+        }
+
+        private InterfaceControl GetInterfaceControl()
+        {
+            return InterfaceControl.FindInterfaceControl(connDock);
+        }
+
+        private void SetEventHandlers()
+        {
+            SetFormEventHandlers();
+            SetContextMenuEventHandlers();
+        }
+
+        private void SetFormEventHandlers()
+        {
+            Load += Connection_Load;
+            DockStateChanged += Connection_DockStateChanged;
+            FormClosing += Connection_FormClosing;
+        }
+
+        private void SetContextMenuEventHandlers()
+        {
+            // event handler to adjust the items within the context menu
+            cmenTab.Opening += ShowHideMenuButtons;
+
+            // event handlers for all context menu items...
+            cmenTabFullscreen.Click += (sender, args) => ToggleFullscreen();
+            cmenTabSmartSize.Click += (sender, args) => ToggleSmartSize();
+            cmenTabViewOnly.Click += (sender, args) => ToggleViewOnly();
+            cmenTabStartChat.Click += (sender, args) => StartChat();
+            cmenTabTransferFile.Click += (sender, args) => TransferFile();
+            cmenTabRefreshScreen.Click += (sender, args) => RefreshScreen();
+            cmenTabSendSpecialKeysCtrlAltDel.Click += (sender, args) => SendSpecialKeys(ProtocolVNC.SpecialKeys.CtrlAltDel);
+            cmenTabSendSpecialKeysCtrlEsc.Click += (sender, args) => SendSpecialKeys(ProtocolVNC.SpecialKeys.CtrlEsc);
+            cmenTabRenameTab.Click += (sender, args) => RenameTab();
+            cmenTabDuplicateTab.Click += (sender, args) => DuplicateTab();
+            cmenTabReconnect.Click += (sender, args) => Reconnect();
+            cmenTabDisconnect.Click += (sender, args) => CloseTabMenu();
+            cmenTabMinimize.Click += (sender, args) => MinimizeTabMenu();
+            cmenTabDisconnectOthers.Click += (sender, args) => CloseOtherTabs();
+            cmenTabDisconnectOthersRight.Click += (sender, args) => CloseOtherTabsToTheRight();
+            cmenTabPuttySettings.Click += (sender, args) => ShowPuttySettingsDialog();
+            GotFocus += ConnectionWindow_GotFocus;
+        }
+
+        private void ConnectionWindow_GotFocus(object sender, EventArgs e)
+        {
+            TabHelper.Instance.CurrentPanel = this;
+        }
+
+        public ConnectionTab AddConnectionTab(ConnectionInfo connectionInfo, DockPane targetPane = null, int? targetContentIndex = null)
+        {
+            try
+            {
+                //Set the connection text based on name and preferences
+                string titleText;
+                if (Properties.OptionsTabsPanelsPage.Default.ShowProtocolOnTabs)
+                    titleText = connectionInfo.Protocol + @": ";
+                else
+                    titleText = "";
+
+                titleText += connectionInfo.Name;
+
+                if (Properties.OptionsTabsPanelsPage.Default.ShowLogonInfoOnTabs)
+                {
+                    titleText += @" (";
+                    if (connectionInfo.Domain != "")
+                        titleText += connectionInfo.Domain;
+
+                    if (connectionInfo.Username != "")
+                    {
+                        if (connectionInfo.Domain != "")
+                            titleText += @"\";
+                        titleText += connectionInfo.Username;
+                    }
+
+                    titleText += @")";
+                }
+
+                titleText = titleText.Replace("&", "&&");
+
+                ConnectionTab conTab = new()
+                {
+                    Tag = connectionInfo,
+                    DockAreas = DockAreas.Document | DockAreas.Float,
+                    Icon = ConnectionIcon.FromString(connectionInfo.Icon),
+                    TabText = titleText,
+                    TabPageContextMenuStrip = cmenTab
+                };
+
+                //if (Settings.Default.AlwaysShowConnectionTabs == false)
+                // TODO: See if we can make this work with DPS...
+                //TabController.HideTabsMode = TabControl.HideTabsModes.HideAlways;
+
+                // Ensure the ConnectionWindow is visible before adding the tab
+                // This prevents visibility issues when the window was created but not yet shown
+                // Check DockState instead of Visible to properly detect if window is shown in DockPanel
+                if (DockState == DockState.Unknown || DockState == DockState.Hidden || !Visible)
+                {
+                    Show(FrmMain.Default.pnlDock, DockState.Document);
+                }
+
+                //Show the tab
+                conTab.Show(connDock, DockState.Document);
+                if (targetPane?.DockPanel == connDock && targetContentIndex.HasValue)
+                {
+                    int contentIndex = Math.Max(0, Math.Min(targetContentIndex.Value, targetPane.DisplayingContents.Count));
+                    conTab.DockTo(targetPane, DockStyle.Fill, contentIndex);
+                }
+
+                FrmMain.Default?.ShowHidePanelTabs();
+                conTab.Focus();
+                return conTab;
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("AddConnectionTab (UI.Window.ConnectionWindow) failed", ex);
+            }
+
+            return null;
+        }
+
+        internal (DockPane? targetPane, int? targetContentIndex, DockContent? targetPanePlaceholder) PrepareReconnectPlacement(ConnectionTab? selectedTab)
+        {
+            DockPane? targetPane = selectedTab?.Pane;
+            int existingIndex = targetPane?.DisplayingContents.IndexOf(selectedTab) ?? -1;
+            int? targetContentIndex = existingIndex >= 0 ? existingIndex : null;
+            DockContent? targetPanePlaceholder = null;
+
+            if (targetPane?.DockPanel == connDock && existingIndex >= 0 && targetPane.DisplayingContents.Count == 1)
+            {
+                targetPanePlaceholder = new DockContent
+                {
+                    CloseButton = false,
+                    CloseButtonVisible = false,
+                    DockAreas = DockAreas.Document | DockAreas.Float,
+                    HideOnClose = true,
+                    TabText = string.Empty,
+                    Text = string.Empty
+                };
+
+                targetPanePlaceholder.Show(connDock, DockState.Document);
+                targetPanePlaceholder.DockTo(targetPane, DockStyle.Fill, existingIndex + 1);
+            }
+
+            return (targetPane, targetContentIndex, targetPanePlaceholder);
+        }
+
+        #endregion
+
+        public void ReconnectAll(IConnectionInitiator initiator)
+        {
+            List<InterfaceControl> controlList = new();
+            try
+            {
+                foreach (IDockContent dockContent in connDock.DocumentsToArray())
+                {
+                    ConnectionTab tab = (ConnectionTab)dockContent;
+                    controlList.Add((InterfaceControl)tab.Tag);
+                }
+
+                foreach (InterfaceControl iControl in controlList)
+                {
+                    iControl.Protocol.Close();
+                    initiator.OpenConnection(iControl.Info, ConnectionInfo.Force.DoNotJump);
+                }
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("reconnectAll (UI.Window.ConnectionWindow) failed", ex);
+            }
+
+            // ReSharper disable once RedundantAssignment
+            controlList = null;
+        }
+
+        #region Form
+
+        private void Connection_Load(object sender, EventArgs e)
+        {
+            ApplyTheme();
+            if (!_themeSubscribed)
+            {
+                ThemeManager.getInstance().ThemeChanged += ApplyTheme;
+                _themeSubscribed = true;
+            }
+            ApplyLanguage();
+            UpdateHeaderStyling();
+        }
+
+        private new void ApplyTheme()
+        {
+            _menuThemes.Add(ThemeManager.getInstance().DefaultTheme.Theme);
+            if (ThemeManager.getInstance().ThemingActive) _menuThemes.Add(ThemeManager.getInstance().ActiveTheme.Theme);
+            if (!ThemeManager.getInstance().ThemingActive)
+            {
+                connDock.Theme = ThemeManager.getInstance().DefaultTheme.Theme;
+                return;
+            }
+
+            base.ApplyTheme();
+            try
+            {
+                connDock.Theme = ThemeManager.getInstance().ActiveTheme.Theme;
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("UI.Window.ConnectionWindow.ApplyTheme() failed", ex);
+            }
+
+            _vsToolStripExtender ??= new VisualStudioToolStripExtender(components)
+            {
+                DefaultRenderer = _toolStripProfessionalRenderer
+            };
+            _vsToolStripExtender.SetStyle(cmenTab, ThemeManager.getInstance().ActiveTheme.Version, ThemeManager.getInstance().ActiveTheme.Theme);
+
+            if (!ThemeManager.getInstance().ActiveAndExtended) return;
+            connDock.DockBackColor = ThemeManager.getInstance().ActiveTheme.ExtendedPalette.getColor("Tab_Item_Background");
+        }
+
+        private bool _documentHandlersAdded;
+        private FloatWindow _resizeFloatWindow;
+
+        private void DetachResizeHandlers()
+        {
+            if (_documentHandlersAdded && FrmMain.IsCreated)
+            {
+                FrmMain.Default.ResizeBegin -= Connection_ResizeBegin;
+                FrmMain.Default.ResizeEnd -= Connection_ResizeEnd;
+                _documentHandlersAdded = false;
+            }
+            if (_resizeFloatWindow != null)
+            {
+                _resizeFloatWindow.ResizeBegin -= Connection_ResizeBegin;
+                _resizeFloatWindow.ResizeEnd -= Connection_ResizeEnd;
+                _resizeFloatWindow = null;
+            }
+        }
+
+        private void Connection_DockStateChanged(object sender, EventArgs e)
+        {
+            DetachResizeHandlers();
+            if (Disposing || IsDisposed) return;
+            switch (DockState)
+            {
+                case DockState.Float:
+                    {
+                        _resizeFloatWindow = DockHandler.FloatPane?.FloatWindow;
+                        if (_resizeFloatWindow != null)
+                        {
+                            _resizeFloatWindow.ResizeBegin += Connection_ResizeBegin;
+                            _resizeFloatWindow.ResizeEnd += Connection_ResizeEnd;
+                        }
+                        break;
+                    }
+                case DockState.Document:
+                    {
+                        FrmMain.Default.ResizeBegin += Connection_ResizeBegin;
+                        FrmMain.Default.ResizeEnd += Connection_ResizeEnd;
+                        _documentHandlersAdded = true;
+                        break;
+                    }
+            }
+        }
+
+        private void ApplyLanguage()
+        {
+            cmenTabFullscreen.Text = Language.Fullscreen;
+            cmenTabSmartSize.Text = Language.SmartSize;
+            cmenTabViewOnly.Text = Language.ViewOnly;
+            cmenTabStartChat.Text = Language.StartChat;
+            cmenTabTransferFile.Text = Language.TransferFile;
+            cmenTabRefreshScreen.Text = Language.RefreshScreen;
+            cmenTabSendSpecialKeys.Text = Language.SendSpecialKeys;
+            cmenTabSendSpecialKeysCtrlAltDel.Text = Language.CtrlAltDel;
+            cmenTabSendSpecialKeysCtrlEsc.Text = Language.CtrlEsc;
+            cmenTabExternalApps.Text = Language._Tools;
+            cmenTabRenameTab.Text = Language.RenameTab;
+            cmenTabDuplicateTab.Text = Language.DuplicateTab;
+            cmenTabReconnect.Text = Language.Reconnect;
+            cmenTabDisconnect.Text = Language.Disconnect;
+            cmenTabMinimize.Text = Language.MinimizeTab;
+            cmenTabDisconnectOthers.Text = Language.DisconnectOthers;
+            cmenTabDisconnectOthersRight.Text = Language.DisconnectOthersRight;
+            cmenTabPuttySettings.Text = Language.PuttySettings;
+            UpdateHeaderStyling();
+        }
+
+        private void UpdateHeaderStyling()
+        {
+            if (IsGeneralPanel)
+            {
+                Font = GeneralPanelHeaderFont;
+            }
+        }
+
+        private void Connection_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (IsGeneralPanel && !FrmMain.Default.IsClosing)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            if (!FrmMain.Default.IsClosing &&
+                (Settings.Default.ConfirmCloseConnection == (int)ConfirmCloseEnum.All & connDock.Documents.Any() ||
+                 Settings.Default.ConfirmCloseConnection == (int)ConfirmCloseEnum.Multiple &
+                 connDock.Documents.Count() > 1))
+            {
+                DialogResult result = CTaskDialog.MessageBox(this, GeneralAppInfo.ProductName, string.Format(Language.ConfirmCloseConnectionPanelMainInstruction, Text), "", "", "", Language.CheckboxDoNotShowThisMessageAgain, ETaskDialogButtons.YesNo, ESysIcons.Question, ESysIcons.Question);
+                if (CTaskDialog.VerificationChecked)
+                {
+                    Settings.Default.ConfirmCloseConnection = (int)ConfirmCloseEnum.Never;
+                    Settings.Default.Save();
+                }
+
+                if (result == DialogResult.No)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            }
+
+            try
+            {
+                foreach (IDockContent dockContent in connDock.Documents.ToArray())
+                {
+                    ConnectionTab tabP = (ConnectionTab)dockContent;
+                    if (tabP.Tag == null) continue;
+                    tabP.silentClose = true;
+                    tabP.Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("UI.Window.Connection.Connection_FormClosing() failed", ex);
+            }
+        }
+
+        public new event EventHandler ResizeBegin;
+
+        private void Connection_ResizeBegin(object sender, EventArgs e)
+        {
+            ResizeBegin?.Invoke(this, e);
+        }
+
+        public new event EventHandler ResizeEnd;
+
+        private void Connection_ResizeEnd(object sender, EventArgs e)
+        {
+            ResizeEnd?.Invoke(sender, e);
+        }
+
+        internal void NavigateToNextTab()
+        {
+            try
+            {
+                var documents = connDock.DocumentsToArray();
+                if (documents.Length <= 1) return;
+
+                var currentIndex = Array.IndexOf(documents, connDock.ActiveContent);
+                if (currentIndex == -1)
+                {
+                    Runtime.MessageCollector.AddMessage(MessageClass.DebugMsg, "NavigateToNextTab: ActiveContent not found in documents array");
+                    return;
+                }
+
+                var nextIndex = (currentIndex + 1) % documents.Length;
+                documents[nextIndex].DockHandler.Activate();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("NavigateToNextTab (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        internal void NavigateToPreviousTab()
+        {
+            try
+            {
+                var documents = connDock.DocumentsToArray();
+                if (documents.Length <= 1) return;
+
+                var currentIndex = Array.IndexOf(documents, connDock.ActiveContent);
+                if (currentIndex == -1)
+                {
+                    Runtime.MessageCollector.AddMessage(MessageClass.DebugMsg, "NavigateToPreviousTab: ActiveContent not found in documents array");
+                    return;
+                }
+
+                var previousIndex = currentIndex - 1;
+                if (previousIndex < 0)
+                    previousIndex = documents.Length - 1;
+                documents[previousIndex].DockHandler.Activate();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("NavigateToPreviousTab (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        internal void NavigateToTab(int index)
+        {
+            try
+            {
+                var documents = connDock.DocumentsToArray();
+                if (index < 0 || index >= documents.Length) return;
+
+                documents[index].DockHandler.Activate();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("NavigateToTab (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        internal IDockContent[] GetDocuments()
+        {
+            try
+            {
+                return connDock.DocumentsToArray();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("GetDocuments (UI.Window.ConnectionWindow) failed", ex);
+                return Array.Empty<IDockContent>();
+            }
+        }
+
+        #endregion
+
+        #region Events
+
+        private void ConnDockOnActiveContentChanged(object sender, EventArgs e)
+        {
+            InterfaceControl ic = GetInterfaceControl();
+            if (ic?.Info == null) return;
+            FrmMain.Default.SelectedConnection = ic.Info;
+        }
+
+        #endregion
+
+        #region Tab Menu
+
+        private void ShowHideMenuButtons(object sender, CancelEventArgs e)
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                if (interfaceControl == null) return;
+
+                if (interfaceControl.Protocol is ISupportsViewOnly viewOnly)
+                {
+                    cmenTabViewOnly.Visible = true;
+                    cmenTabViewOnly.Checked = viewOnly.ViewOnly;
+                }
+                else
+                {
+                    cmenTabViewOnly.Visible = false;
+                }
+
+                if (interfaceControl.Info.Protocol == ProtocolType.RDP)
+                {
+                    RdpProtocol rdp = (RdpProtocol)interfaceControl.Protocol;
+                    cmenTabFullscreen.Visible = true;
+                    cmenTabFullscreen.Checked = rdp.Fullscreen;
+                    cmenTabSmartSize.Visible = true;
+                    cmenTabSmartSize.Checked = rdp.SmartSize;
+                }
+                else
+                {
+                    cmenTabFullscreen.Visible = false;
+                    cmenTabSmartSize.Visible = false;
+                }
+
+                if (interfaceControl.Info.Protocol == ProtocolType.VNC)
+                {
+                    ProtocolVNC vnc = (ProtocolVNC)interfaceControl.Protocol;
+                    cmenTabSendSpecialKeys.Visible = true;
+                    cmenTabSmartSize.Visible = true;
+                    cmenTabStartChat.Visible = true;
+                    cmenTabRefreshScreen.Visible = true;
+                    cmenTabTransferFile.Visible = false;
+                }
+                else
+                {
+                    cmenTabSendSpecialKeys.Visible = false;
+                    cmenTabStartChat.Visible = false;
+                    cmenTabRefreshScreen.Visible = false;
+                    cmenTabTransferFile.Visible = false;
+                }
+
+                if (interfaceControl.Info.Protocol == ProtocolType.SSH1 |
+                    interfaceControl.Info.Protocol == ProtocolType.SSH2)
+                {
+                    cmenTabTransferFile.Visible = true;
+                }
+
+                cmenTabPuttySettings.Visible = interfaceControl.Protocol is PuttyBase;
+
+                AddExternalApps();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("ShowHideMenuButtons (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        #endregion
+
+        #region Tab Actions
+
+        private void ToggleSmartSize()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+
+                switch (interfaceControl.Protocol)
+                {
+                    case RdpProtocol rdp:
+                        rdp.ToggleSmartSize();
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("ToggleSmartSize (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void TransferFile()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                if (interfaceControl == null) return;
+
+                if (interfaceControl.Info.Protocol == ProtocolType.SSH1 |
+                    interfaceControl.Info.Protocol == ProtocolType.SSH2)
+                    SshTransferFile();
+                else if (interfaceControl.Info.Protocol == ProtocolType.VNC)
+                    VncTransferFile();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("TransferFile (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void SshTransferFile()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                if (interfaceControl == null) return;
+
+                ConnectionInfo connectionInfo = interfaceControl.OriginalInfo ?? interfaceControl.Info;
+                var dialog = new SshFileTransferForm(connectionInfo);
+                dialog.Show(this);
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("SSHTransferFile (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void VncTransferFile()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                ProtocolVNC vnc = interfaceControl?.Protocol as ProtocolVNC;
+                vnc?.StartFileTransfer();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("VNCTransferFile (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void ToggleViewOnly()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                if (!(interfaceControl?.Protocol is ISupportsViewOnly viewOnly))
+                    return;
+
+                cmenTabViewOnly.Checked = !cmenTabViewOnly.Checked;
+                viewOnly.ToggleViewOnly();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("ToggleViewOnly (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void StartChat()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                ProtocolVNC vnc = interfaceControl?.Protocol as ProtocolVNC;
+                vnc?.StartChat();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("StartChat (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void RefreshScreen()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                ProtocolVNC vnc = interfaceControl?.Protocol as ProtocolVNC;
+                vnc?.RefreshScreen();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("RefreshScreen (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void SendSpecialKeys(ProtocolVNC.SpecialKeys keys)
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                ProtocolVNC vnc = interfaceControl?.Protocol as ProtocolVNC;
+                vnc?.SendSpecialKeys(keys);
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("SendSpecialKeys (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void ToggleFullscreen()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                RdpProtocol rdp = interfaceControl?.Protocol as RdpProtocol;
+                rdp?.ToggleFullscreen();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("ToggleFullscreen (UI.Window.ConnectionWindow) failed",
+                                                             ex);
+            }
+        }
+
+        private void ShowPuttySettingsDialog()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                PuttyBase puttyBase = interfaceControl?.Protocol as PuttyBase;
+                puttyBase?.ShowSettingsDialog();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage(
+                                                             "ShowPuttySettingsDialog (UI.Window.ConnectionWindow) failed",
+                                                             ex);
+            }
+        }
+
+        private void AddExternalApps()
+        {
+            try
+            {
+                //clean up. since new items are added below, we have to dispose of any previous items first
+                if (cmenTabExternalApps.DropDownItems.Count > 0)
+                {
+                    for (int i = cmenTabExternalApps.DropDownItems.Count - 1; i >= 0; i--)
+                        cmenTabExternalApps.DropDownItems[i].Dispose();
+                    cmenTabExternalApps.DropDownItems.Clear();
+                }
+
+                cmenTabExternalApps.DropDownItems.AddRange(
+                    ExternalToolsMenuBuilder.CreateMenuItems(
+                        Runtime.ExternalToolsService.ExternalTools,
+                        (sender, args) => StartExternalApp(((ToolStripMenuItem)sender)?.Tag as ExternalTool)));
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionStackTrace("cMenTreeTools_DropDownOpening failed (UI.Window.ConnectionWindow)", ex);
+            }
+        }
+
+        private void StartExternalApp(ExternalTool externalTool)
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                externalTool.Start(interfaceControl?.Info);
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("cmenTabExternalAppsEntry_Click failed (UI.Window.ConnectionWindow)", ex);
+            }
+        }
+
+
+        private void CloseTabMenu()
+        {
+            ConnectionTab selectedTab = GetSelectedConnectionTab();
+            if (selectedTab == null) return;
+
+            try
+            {
+                selectedTab.Close();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("CloseTabMenu (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void MinimizeTabMenu()
+        {
+            ConnectionTab selectedTab = GetSelectedConnectionTab();
+            if (selectedTab == null) return;
+
+            try
+            {
+                selectedTab.MinimizeToBottomAutoHide();
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("MinimizeTabMenu (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void CloseOtherTabs()
+        {
+            ConnectionTab selectedTab = GetSelectedConnectionTab();
+            if (selectedTab == null) return;
+            if (Settings.Default.ConfirmCloseConnection == (int)ConfirmCloseEnum.Multiple)
+            {
+                DialogResult result = CTaskDialog.MessageBox(this, GeneralAppInfo.ProductName,
+                                                    string.Format(Language.ConfirmCloseConnectionOthersInstruction,
+                                                                  selectedTab.TabText), "", "", "",
+                                                    Language.CheckboxDoNotShowThisMessageAgain,
+                                                    ETaskDialogButtons.YesNo, ESysIcons.Question,
+                                                    ESysIcons.Question);
+                if (CTaskDialog.VerificationChecked)
+                {
+                    Settings.Default.ConfirmCloseConnection = (int)ConfirmCloseEnum.Never;
+                    Settings.Default.Save();
+                }
+
+                if (result == DialogResult.No)
+                {
+                    return;
+                }
+            }
+
+            foreach (IDockContent dockContent in connDock.Documents.ToArray())
+            {
+                ConnectionTab tab = (ConnectionTab)dockContent;
+                if (selectedTab != tab)
+                {
+                    tab.Close();
+                }
+            }
+        }
+
+        private void CloseOtherTabsToTheRight()
+        {
+            try
+            {
+                ConnectionTab selectedTab = GetSelectedConnectionTab();
+                if (selectedTab == null) return;
+                DockPane dockPane = selectedTab.Pane;
+
+                bool pastTabToKeepAlive = false;
+                List<ConnectionTab> connectionsToClose = new();
+                foreach (IDockContent dockContent in dockPane.Contents)
+                {
+                    ConnectionTab tab = (ConnectionTab)dockContent;
+                    if (pastTabToKeepAlive)
+                        connectionsToClose.Add(tab);
+
+                    if (selectedTab == tab)
+                        pastTabToKeepAlive = true;
+                }
+
+                foreach (ConnectionTab tab in connectionsToClose)
+                {
+                    tab.Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("CloseTabMenu (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void DuplicateTab()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                if (interfaceControl == null) return;
+                Runtime.ConnectionInitiator.OpenConnection(interfaceControl.Info, ConnectionInfo.Force.DoNotJump);
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("DuplicateTab (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void Reconnect()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                if (interfaceControl == null)
+                {
+                    Runtime.MessageCollector.AddMessage(MessageClass.WarningMsg, "Reconnect (UI.Window.ConnectionWindow) failed. Could not find InterfaceControl.");
+                    return;
+                }
+
+                ConnectionTab selectedTab = interfaceControl.Parent as ConnectionTab;
+                var reconnectPlacement = PrepareReconnectPlacement(selectedTab);
+
+                Invoke(new Action(() => Prot_Event_Closed(interfaceControl.Protocol)));
+                Runtime.ConnectionInitiator.OpenConnection(interfaceControl.Info, ConnectionInfo.Force.DoNotJump, this, reconnectPlacement.targetPane, reconnectPlacement.targetContentIndex, reconnectPlacement.targetPanePlaceholder);
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("Reconnect (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private void RenameTab()
+        {
+            try
+            {
+                InterfaceControl interfaceControl = GetInterfaceControl();
+                if (interfaceControl == null) return;
+                using (FrmInputBox frmInputBox = new(Language.NewTitle, Language.NewTitle,
+                                                         ((ConnectionTab)interfaceControl.Parent).TabText))
+                {
+                    DialogResult dr = frmInputBox.ShowDialog();
+                    if (dr != DialogResult.OK) return;
+                    if (!string.IsNullOrEmpty(frmInputBox.returnValue))
+                        ((ConnectionTab)interfaceControl.Parent).TabText = frmInputBox.returnValue.Replace("&", "&&");
+                }
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddExceptionMessage("RenameTab (UI.Window.ConnectionWindow) failed", ex);
+            }
+        }
+
+        private ConnectionTab GetSelectedConnectionTab()
+        {
+            return GetInterfaceControl()?.Parent as ConnectionTab;
+        }
+
+        #endregion
+
+        #region Protocols
+
+        public void Prot_Event_Closed(object sender)
+        {
+            ProtocolBase protocolBase = sender as ProtocolBase;
+            if (!(protocolBase?.InterfaceControl.Parent is ConnectionTab tabPage)) return;
+            if (tabPage.Disposing || tabPage.IsDisposed) return;
+            if (IsDisposed || Disposing || !IsHandleCreated) return;
+            tabPage.protocolClose = true;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (tabPage.Disposing || tabPage.IsDisposed) return;
+                    tabPage.Close();
+                }));
+            }
+            else
+            {
+                tabPage.Close();
+            }
+        }
+
+        #endregion
+    }
+}

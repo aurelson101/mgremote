@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+  <PropertyGroup>
+    <AcceptEula>wix7</AcceptEula>
+    <OutputType>Package</OutputType>
+    <MGRemoteVersion Condition="'$(MGRemoteVersion)' == ''">0.1.13</MGRemoteVersion>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <OutputName>MGRemote-$(MGRemoteVersion)-win-$(Platform)-preview</OutputName>
+    <OutputPath>..\artifacts\installers\</OutputPath>
+    <DefineConstants>PublishDir=$(PublishDir);MGRemoteVersion=$(MGRemoteVersion);SourceDir=$(MSBuildProjectDirectory)\..</DefineConstants>
+    <SuppressPdbOutput>true</SuppressPdbOutput>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" />
+  </ItemGroup>
+</Project>

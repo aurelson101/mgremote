@@ -1,0 +1,67 @@
+<!-- MGRemote modification, 2026-10-29. GPL-2.0; see COPYING.txt. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="MGRemote (Preview)" Manufacturer="MGRemote contributors" Version="$(var.MGRemoteVersion)"
+           UpgradeCode="B2E9F552-D411-4719-A829-164CE19B58A0" Scope="perMachine" InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer MGRemote version is already installed." />
+    <Property Id="PURGEUSERDATA" Secure="yes" />
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="MGRemoteRememberInstallFolder" Root="HKLM" Key="SOFTWARE\MGRemote" Name="InstallDir" Type="raw" />
+    </Property>
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.SourceDir)\mRemoteNGInstaller\Installer\Resources\License.rtf" />
+    <CustomAction Id="MGRemotePurgeUserData" FileRef="MGRemoteExe" ExeCommand="--purge-mgremote-user-data" Execute="immediate" Impersonate="yes" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="MGRemotePurgeUserData" Before="RemoveFiles" Condition="Installed AND REMOVE=&quot;ALL&quot; AND PURGEUSERDATA=&quot;1&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+    <UI>
+      <Dialog Id="MGRemoteRemoveOptionsDlg" Width="370" Height="270" Title="[ProductName] - User data">
+        <Control Id="Title" Type="Text" X="20" Y="15" Width="330" Height="30" Text="MGRemote maintenance" />
+        <Control Id="Details" Type="Text" X="20" Y="55" Width="330" Height="65" Text="During uninstall, you can also remove MGRemote settings, saved connections, temporary keys and generated SSH profiles for the current Windows user. Personal SSH keys and other applications are preserved." />
+        <Control Id="Purge" Type="CheckBox" X="20" Y="135" Width="330" Height="30" Property="PURGEUSERDATA" CheckBoxValue="1" Text="Also delete my MGRemote data when uninstalling (cannot be undone)" />
+        <Control Id="Notice" Type="Text" X="20" Y="175" Width="330" Height="30" Text="Windows/security logs are retained. Data is always preserved during upgrades and repairs." />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="Back">
+          <Publish Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="Next">
+          <Publish Event="NewDialog" Value="MaintenanceTypeDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MGRemoteRemoveOptionsDlg" Order="99" />
+    </UI>
+    <MediaTemplate EmbedCab="yes" />
+    <!-- Windows Installer compatibility properties can report an older Windows build. -->
+    <Property Id="MGREMOTE_WINDOWS_BUILD" Secure="yes">
+      <RegistrySearch Id="MGRemoteWindowsBuild" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion" Name="CurrentBuildNumber" Type="raw" />
+    </Property>
+    <Launch Condition="Installed OR (VersionNT64 AND MGREMOTE_WINDOWS_BUILD &gt;= 17763)" Message="MGRemote requires 64-bit Windows 10 version 1809 or later, or a compatible Windows Server release. Detected build: [MGREMOTE_WINDOWS_BUILD]." />
+    <Icon Id="MGRemoteIcon" SourceFile="$(var.SourceDir)\mRemoteNG\Icons\mRemoteNG.ico" />
+    <Property Id="ARPPRODUCTICON" Value="MGRemoteIcon" />
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="MGRemote" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="MGRemoteMenu" Name="MGRemote">
+        <Component Id="MGRemoteShortcut" Guid="*">
+          <Shortcut Id="MGRemoteStartMenu" Name="MGRemote" Target="[INSTALLFOLDER]MGRemote.exe" WorkingDirectory="INSTALLFOLDER" Icon="MGRemoteIcon" />
+          <RemoveFolder Id="RemoveMGRemoteMenu" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\MGRemote" Name="StartMenuInstalled" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Main" Title="MGRemote" Level="1">
+      <Files Include="$(var.PublishDir)\**" Directory="INSTALLFOLDER">
+        <Exclude Files="$(var.PublishDir)\MGRemote.exe" />
+      </Files>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Id="MGRemoteExe" Source="$(var.PublishDir)\MGRemote.exe" KeyPath="yes" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\MGRemote" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      </Component>
+      <ComponentRef Id="MGRemoteShortcut" />
+    </Feature>
+  </Package>
+</Wix>
