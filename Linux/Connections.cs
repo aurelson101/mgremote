@@ -194,6 +194,8 @@ public static class SessionLauncher
     internal static ProcessStartInfo Terminal(uint parent, string executable, IEnumerable<string> arguments)
     {
         var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
+        start.ArgumentList.Add("-hold"); // Keep connection errors/output readable after the client exits.
+        start.ArgumentList.Add("-xrm"); start.ArgumentList.Add("XTerm*allowWindowOps: false");
         foreach (string arg in new[] { "-into", parent.ToString(System.Globalization.CultureInfo.InvariantCulture), "-bg", "#181a1f", "-fg", "#e6e6e6", "-fa", "Monospace", "-fs", "11", "-sl", "5000", "-xrm", "XTerm*VT100.translations: #override\\n Ctrl Shift <Key>C: copy-selection(CLIPBOARD)\\n Ctrl Shift <Key>V: insert-selection(CLIPBOARD)", "-e", executable }) start.ArgumentList.Add(arg);
         foreach (var arg in arguments) start.ArgumentList.Add(arg);
         return start;

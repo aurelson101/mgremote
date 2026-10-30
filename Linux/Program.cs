@@ -71,7 +71,7 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.0"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600;
+        Title = "MGRemote — Linux Desktop 0.2.0"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = Brush.Parse("#eef1f5"); Foreground = Brush.Parse("#1f2937");
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu();
