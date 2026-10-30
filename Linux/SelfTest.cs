@@ -121,6 +121,16 @@ internal static class SelfTest
             bool innerDtdBlocked = false; try { Connections.Import(path, out _, "fixture-master"); } catch (System.Xml.XmlException) { innerDtdBlocked = true; } Check(innerDtdBlocked);
             File.WriteAllText(path, "<Connections FullFileEncryption='true'><Node Protocol='RDP' Hostname='server'/></Connections>");
             bool encryptedBlocked = false; try { Connections.Import(path); } catch (System.Security.Cryptography.CryptographicException) { encryptedBlocked = true; } Check(encryptedBlocked);
+            File.WriteAllText(path, "<Connections><Node Type='Container' Name='Empty'><Node Type='Container' Name='Nested'/></Node></Connections>");
+            Check(Connections.Import(path, out _, out var emptyFolders).Count == 0 && emptyFolders.Length == 2);
+            Check(emptyFolders[1].SequenceEqual(new[] { "Empty", "Nested" }));
+            var draft = new Connection { IsDraft = true }; Connections.Validate(draft, allowDraft: true); Reject(() => SessionLauncher.Arguments(draft));
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new[] { new Connection { Host = "server" } }));
+            Check(Connections.LoadStore(path).Items.Single().Host == "server" && Connections.LoadStore(path).Folders.Length == 0);
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new[] { new Connection { Host = "server", FolderPath = ["Legacy", "Nested"] } }));
+            Check(Connections.LoadStore(path).Folders.Length == 2);
+            File.WriteAllText(path, "{\"Version\":99,\"Items\":[],\"Folders\":[]}");
+            bool futureStoreBlocked = false; try { Connections.LoadStore(path); } catch (InvalidDataException) { futureStoreBlocked = true; } Check(futureStoreBlocked);
             File.WriteAllText(path, "<!DOCTYPE Connections [<!ENTITY secret SYSTEM 'file:///etc/passwd'>]><Connections>&secret;</Connections>");
             bool blocked = false; try { Connections.Import(path); } catch (System.Xml.XmlException) { blocked = true; } Check(blocked);
         } finally { File.Delete(path); }

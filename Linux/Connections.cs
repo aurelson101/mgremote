@@ -9,6 +9,7 @@ namespace MGRemote.Linux;
 
 public sealed record Connection
 {
+    public bool IsDraft { get; set; }
     public string Name { get; set; } = "Nouvelle connexion";
     public string EncryptedPassword { get; set; } = "";
     public string GatewayHost { get; set; } = "";
@@ -51,8 +52,10 @@ public static class Connections
     public static List<Connection> Import(string path)
         => Import(path, out _);
     public static List<Connection> Import(string path, out int skipped, string? sourcePassword = null, string? localPassword = null)
+        => Import(path, out skipped, out _, sourcePassword, localPassword);
+    public static List<Connection> Import(string path, out int skipped, out string[][] folders, string? sourcePassword = null, string? localPassword = null)
     {
-        skipped = 0;
+        skipped = 0; folders = [];
         using var reader = XmlReader.Create(path, new XmlReaderSettings {
             DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 16 * 1024 * 1024 });
         var xml = XDocument.Load(reader);
@@ -70,6 +73,10 @@ public static class Connections
             var inner = XDocument.Load(innerReader);
             xml.Root.ReplaceNodes(inner.Root!.Nodes());
         }
+        folders = xml.Descendants().Where(n => n.Name.LocalName == "Node" && (string?)n.Attribute("Type") == "Container")
+            .Select(n => n.AncestorsAndSelf().Reverse().Where(a => (string?)a.Attribute("Type") == "Container").Select(a => (string?)a.Attribute("Name") ?? "Dossier").ToArray())
+            .DistinctBy(p => JsonSerializer.Serialize(p)).ToArray();
+        foreach (var folderPath in folders) ValidateFolderPath(folderPath);
         int secretCount = 0; long sourceWork = 0;
         var results = new List<Connection>();
         foreach (var node in xml.Descendants().Where(n => n.Name.LocalName == "Node")) {
@@ -111,7 +118,7 @@ public static class Connections
             Validate(connection);
             results.Add(connection);
         }
-        if (results.Count == 0) throw new InvalidDataException("Aucune connexion SSH2/RDP explicite importable. Les fichiers entièrement chiffrés et les valeurs héritées doivent être exportés à plat sans secrets depuis Windows.");
+        if (results.Count == 0 && folders.Length == 0) throw new InvalidDataException("Aucune connexion SSH2/RDP explicite importable. Les fichiers entièrement chiffrés et les valeurs héritées doivent être exportés à plat sans secrets depuis Windows.");
         return results;
     }
     private static bool ReadBoolean(XElement node, string name)
@@ -120,7 +127,7 @@ public static class Connections
         if (string.IsNullOrEmpty(text)) return false;
         return bool.TryParse(text, out bool value) ? value : throw new InvalidDataException("Valeur XML booléenne invalide : " + name);
     }
-    public static void Validate(Connection c)
+    public static void Validate(Connection c, bool allowDraft = false)
     {
         if (c == null || c.Host == null || c.User == null || c.Domain == null || c.Identity == null || c.JumpHost == null || c.RdpSharePath == null) throw new ArgumentException("Connexion incomplète : hôte, utilisateur, domaine ou clé manquant dans les données.");
         if (string.IsNullOrWhiteSpace(c.Name) || c.Name.Length > 256 || c.Name.Any(char.IsControl)) throw new ArgumentException("Nom invalide.");
@@ -129,14 +136,14 @@ public static class Connections
         if (c.GatewayHost.Length > 0 && (!Regex.IsMatch(c.GatewayHost, @"\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,252}(?::[0-9]{1,5})?\z") || (c.GatewayHost.Contains(':') && (!int.TryParse(c.GatewayHost.Split(':')[1], out int gatewayPort) || gatewayPort is < 1 or > 65535)))) throw new ArgumentException("Hôte ou port de passerelle RDP invalide.");
         if (c.Description == null || c.Description.Length > 4096 || c.Description.Any(ch => char.IsControl(ch) && ch is not ('\r' or '\n' or '\t'))) throw new ArgumentException("Description invalide.");
         if (c.ColorDepth is not (8 or 15 or 16 or 24 or 32) || c.AudioMode is < 0 or > 2) throw new ArgumentException("Couleurs ou son RDP invalides.");
-        if (c.FolderPath == null || c.FolderPath.Length > 128 || c.FolderPath.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 256 || p.Any(char.IsControl))) throw new ArgumentException("Dossier de connexion invalide.");
+        ValidateFolderPath(c.FolderPath);
         if (c.Protocol == "Serial") {
             if (!Regex.IsMatch(c.Host, @"\A/dev/(?:tty(?:USB|ACM|S)[0-9]+|serial/by-id/[A-Za-z0-9_.:+-]+|pts/[0-9]+)\z")) throw new ArgumentException("Port série Linux invalide (exemple : /dev/ttyUSB0).");
             if (c.BaudRate < 50 || c.BaudRate > 4000000 || c.DataBits < 5 || c.DataBits > 8 || c.StopBits is not (1 or 2) ||
                 c.Parity is not ("none" or "even" or "odd") || c.FlowControl is not ("none" or "hardware" or "software")) throw new ArgumentException("Paramètres série invalides.");
             return;
         }
-        if (!Regex.IsMatch(c.Host, @"\A[A-Za-z0-9_\[\]][A-Za-z0-9_.:\[\]-]{0,252}\z")) throw new ArgumentException("Hôte/IP ou alias SSH invalide.");
+        if (!(allowDraft && c.IsDraft && c.Host.Length == 0) && !Regex.IsMatch(c.Host, @"\A[A-Za-z0-9_\[\]][A-Za-z0-9_.:\[\]-]{0,252}\z")) throw new ArgumentException("Renseignez un hôte/IP ou alias SSH valide avant connexion.");
         if (c.Protocol != "SSH" && c.Protocol != "RDP") throw new ArgumentException("Protocole non pris en charge.");
         if (c.Port is < 1 or > 65535) throw new ArgumentException("Port invalide.");
         foreach (string text in new[] { c.User, c.Domain })
@@ -149,27 +156,43 @@ public static class Connections
             c.RdpSharePath.Any(char.IsControl) || c.RdpSharePath.Contains(','))) throw new ArgumentException("Choisissez un dossier RDP local absolu, sans virgule ni caractères de contrôle.");
     }
     public static string DataPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MGRemoteLinux", "connections.json");
-    public static List<Connection> Load()
+    internal static void ValidateFolderPath(string[] path)
     {
-        if (!File.Exists(DataPath)) return [];
-        if (new FileInfo(DataPath).Length > 16 * 1024 * 1024) throw new InvalidDataException("Fichier de connexions trop volumineux.");
-        var items = JsonSerializer.Deserialize<List<Connection>>(File.ReadAllText(DataPath)) ?? [];
-        foreach (var item in items) Validate(item);
-        return items;
+        if (path == null || path.Length > 128 || path.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 256 || p.Any(char.IsControl))) throw new ArgumentException("Dossier de connexion invalide.");
     }
-    public static void Save(IEnumerable<Connection> connections)
+    public sealed record Store(int Version, Connection[] Items, string[][] Folders);
+    public static List<Connection> Load() => LoadStore().Items.ToList();
+    public static Store LoadStore(string? dataPath = null)
     {
-        var items = connections.ToArray(); foreach (var item in items) Validate(item);
-        string folder = Path.GetDirectoryName(DataPath)!;
-        if (new DirectoryInfo(folder).LinkTarget != null || new FileInfo(DataPath).LinkTarget != null) throw new IOException("Stockage redirigé par lien refusé.");
+        string file = dataPath ?? DataPath;
+        if (!File.Exists(file)) return new Store(1, [], []);
+        if (new FileInfo(file).Length > 16 * 1024 * 1024) throw new InvalidDataException("Fichier de connexions trop volumineux.");
+        using var json = JsonDocument.Parse(File.ReadAllText(file));
+        Store store = json.RootElement.ValueKind == JsonValueKind.Array
+            ? new Store(1, json.RootElement.Deserialize<Connection[]>()!, [])
+            : json.RootElement.Deserialize<Store>() ?? throw new InvalidDataException("Stockage invalide.");
+        if (store.Version != 1 || store.Items == null || store.Folders == null) throw new InvalidDataException("Version de stockage non prise en charge ou données incomplètes.");
+        foreach (var item in store.Items) Validate(item, allowDraft: true);
+        foreach (var path in store.Folders) { ValidateFolderPath(path); if (path.Length == 0) throw new InvalidDataException("Dossier racine explicite invalide."); }
+        return store with { Folders = store.Folders.Concat(store.Items.Select(c => c.FolderPath))
+            .SelectMany(path => Enumerable.Range(1, path.Length).Select(length => path.Take(length).ToArray()))
+            .DistinctBy(path => JsonSerializer.Serialize(path)).ToArray() };
+    }
+    public static void Save(IEnumerable<Connection> connections, IEnumerable<string[]>? folders = null, string? dataPath = null)
+    {
+        var items = connections.ToArray(); foreach (var item in items) Validate(item, allowDraft: true);
+        var paths = (folders ?? []).ToArray(); foreach (var path in paths) { ValidateFolderPath(path); if (path.Length == 0) throw new ArgumentException("Dossier racine explicite invalide."); }
+        string file = dataPath ?? DataPath;
+        string folder = Path.GetDirectoryName(file)!;
+        if (new DirectoryInfo(folder).LinkTarget != null || new FileInfo(file).LinkTarget != null) throw new IOException("Stockage redirigé par lien refusé.");
         Directory.CreateDirectory(folder);
         if (OperatingSystem.IsLinux()) File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         string temporary = Path.Combine(folder, ".connections-" + Guid.NewGuid().ToString("N"));
         try {
             var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
             if (OperatingSystem.IsLinux()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-            using (var stream = new FileStream(temporary, options)) JsonSerializer.Serialize(stream, items, new JsonSerializerOptions { WriteIndented = true });
-            File.Move(temporary, DataPath, true);
+            using (var stream = new FileStream(temporary, options)) JsonSerializer.Serialize(stream, new Store(1, items, paths), new JsonSerializerOptions { WriteIndented = true });
+            File.Move(temporary, file, true);
         } finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 }

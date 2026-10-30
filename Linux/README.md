@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.3 â€” work in progress
+# MGRemote Linux Desktop 0.2.4 â€” work in progress
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -40,3 +40,9 @@ At connection time, unlock the imported password with the local passphrase or ch
 SSH/SFTP uses a bundled OpenSSH askpass helper, allows one password attempt, retains public-key authentication and requires StrictHostKeyChecking=yes. The broker only answers the exact destination user/host password prompt. Unknown hosts, aliases resolving to another prompt, bastion passwords, key passphrases and interactive/MFA prompts require the manual connection path. First connect manually and verify the server fingerprint through a trusted channel.
 
 Direct RDP uses FreeRDP /from-stdin:force through a child process with a private stdin pipe; the username must be configured. Certificate verification and NLA remain enabled. Gateway credentials and external/multimonitor connections remain manual. Offline tests exercise the actual askpass helper and stdin delivery to a synthetic local client, refusal of invalid tokens/wrong targets/key prompts, restrictive permissions and socket cleanup. Real server authentication still requires validation. This section supersedes the earlier manual-only credential description.
+
+## Development update 0.2.4: connection-tree actions
+
+Right-click the root, a folder or a connection to create a folder or connection, edit/rename, duplicate, connect, use SFTP or delete as applicable. Right-click selects its target before opening the menu. F2 edits/renames; Insert creates a connection. New connections appear immediately as drafts; configure the host/protocol and save in the Configuration panel before connecting. Empty folders are persisted and imported from XML. Renaming a folder updates descendant paths while retaining encrypted credential fields. Folder deletion is limited to empty folders to prevent unintended subtree removal.
+
+The local store now uses a versioned document holding both connections and folders. Existing JSON array profiles remain readable and are converted on the next save. Older AppImages cannot read the new format; back up connections.json before upgrading if you need to downgrade. Invalid/unknown storage versions block writes. GUI tests operate on an isolated temporary profile and cover menu actions, selection, draft validation, renaming, empty-folder persistence and deletion safety.

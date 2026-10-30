@@ -28,18 +28,24 @@ public sealed partial class MainWindow
         string query = _search.Text?.Trim() ?? "";
         var items = new List<TreeViewItem>();
         var root = new TreeViewItem { Header = "Connexions", Tag = Array.Empty<string>(), IsExpanded = true, ItemsSource = items };
-        var folders = new Dictionary<string, TreeViewItem>(); _nodes.Clear();
-        foreach (var c in _connections) {
-            if (query.Length > 0 && !c.Name.Contains(query, StringComparison.OrdinalIgnoreCase) && !c.Host.Contains(query, StringComparison.OrdinalIgnoreCase) && !string.Join(" > ", c.FolderPath).Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
+        _folderNodes.Clear(); _nodes.Clear(); _folderNodes[FolderKey([])] = root;
+        TreeViewItem EnsureFolder(string[] path)
+        {
             var parent = root;
-            for (int i = 0; i < c.FolderPath.Length; i++) {
-                string[] path = c.FolderPath.Take(i + 1).ToArray(); string key = JsonSerializer.Serialize(path);
-                if (!folders.TryGetValue(key, out var folder)) {
-                    folder = new TreeViewItem { Header = "▸ " + c.FolderPath[i], Tag = path, IsExpanded = true, ItemsSource = new List<TreeViewItem>() };
-                    ((List<TreeViewItem>)parent.ItemsSource!).Add(folder); folders.Add(key, folder);
+            for (int i = 0; i < path.Length; i++) {
+                string[] prefix = path.Take(i + 1).ToArray(); string key = FolderKey(prefix);
+                if (!_folderNodes.TryGetValue(key, out var folder)) {
+                    folder = new TreeViewItem { Header = "▸ " + path[i], Tag = prefix, IsExpanded = true, ItemsSource = new List<TreeViewItem>() };
+                    ((List<TreeViewItem>)parent.ItemsSource!).Add(folder); _folderNodes.Add(key, folder);
                 }
                 parent = folder;
             }
+            return parent;
+        }
+        foreach (var path in _folders) if (query.Length == 0 || string.Join(" > ", path).Contains(query, StringComparison.OrdinalIgnoreCase)) EnsureFolder(path);
+        foreach (var c in _connections) {
+            if (query.Length > 0 && !c.Name.Contains(query, StringComparison.OrdinalIgnoreCase) && !c.Host.Contains(query, StringComparison.OrdinalIgnoreCase) && !string.Join(" > ", c.FolderPath).Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
+            var parent = EnsureFolder(c.FolderPath);
             var node = new TreeViewItem { Header = c.Protocol + " · " + c.Name, Tag = c };
             ((List<TreeViewItem>)parent.ItemsSource!).Add(node); _nodes.Add(c, node);
         }
@@ -81,7 +87,7 @@ public sealed partial class MainWindow
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         actions.Children.Add(Button("Annuler", () => dialog.Close(false))); actions.Children.Add(Button("Supprimer", () => dialog.Close(true))); panel.Children.Add(actions); dialog.Content = panel;
         if (!await dialog.ShowDialog<bool>(this)) return;
-        try { var next = _connections.Where(c => !ReferenceEquals(c, target)).ToArray(); Connections.Save(next); _connections.Remove(target); Filter(); New(); _status.Text = "Connexion supprimée ; sessions ouvertes conservées."; }
+        try { var next = _connections.Where(c => !ReferenceEquals(c, target)).ToArray(); Persist(next); _connections.Remove(target); Filter(); New(); _status.Text = "Connexion supprimée ; sessions ouvertes conservées."; }
         catch (Exception ex) { _status.Text = ex.Message; }
     }
     internal async Task VerifyEmbeddedSessions()
