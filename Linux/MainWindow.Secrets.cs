@@ -7,6 +7,36 @@ namespace MGRemote.Linux;
 public sealed partial class MainWindow
 {
     private sealed record ImportKeys(string? Source, string? Local);
+    private sealed record AuthenticationChoice(CredentialBroker? Broker);
+    private async Task<CredentialBroker?> UnlockConnection(Connection connection)
+    {
+        if (connection.EncryptedPassword.Length == 0 || connection.Protocol is not ("SSH" or "RDP")) return null;
+        var dialog = new Window { Title = "Authentification — " + connection.Name, Width = 520, Height = 350, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var panel = new StackPanel { Spacing = 12, Margin = new Thickness(18) };
+        bool supported = connection.Protocol != "RDP" || (connection.User.Length > 0 && connection.GatewayHost.Length == 0);
+        panel.Children.Add(new TextBlock { Text = supported
+            ? "Déverrouillez le mot de passe importé pour cette connexion uniquement. SSH exige une clé d’hôte déjà vérifiée ; pour une première connexion, un bastion ou une phrase de clé privée, utilisez le mode manuel."
+            : "Cette connexion nécessite l’authentification manuelle : renseignez l’utilisateur RDP ; les identifiants de passerelle ne sont pas encore automatisés.", TextWrapping = TextWrapping.Wrap });
+        var key = new TextBox { PasswordChar = '●', PlaceholderText = "Phrase secrète locale", IsEnabled = supported };
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var unlock = new Button { Content = "Utiliser le secret importé", IsEnabled = supported };
+        bool closed = false;
+        unlock.Click += async (_, _) => {
+            unlock.IsEnabled = false; string phrase = key.Text ?? ""; key.Text = "";
+            try {
+                string password = await Task.Run(() => XmlSecrets.Unprotect(connection.EncryptedPassword, phrase));
+                if (!closed) dialog.Close(new AuthenticationChoice(new CredentialBroker(connection, password)));
+            } catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or ArgumentException or NotSupportedException or IOException or System.Net.Sockets.SocketException) {
+                if (!closed) status.Text = "Déverrouillage impossible. Vérifiez la phrase secrète ou choisissez le mode manuel.";
+            } finally { if (!closed) unlock.IsEnabled = true; }
+        };
+        panel.Children.Add(key); panel.Children.Add(status); panel.Children.Add(unlock);
+        panel.Children.Add(Button("Connexion manuelle", () => dialog.Close(new AuthenticationChoice(null))));
+        panel.Children.Add(Button("Annuler", () => dialog.Close()));
+        dialog.Content = new ScrollViewer { Content = panel }; dialog.Closed += (_, _) => { closed = true; key.Text = ""; };
+        var choice = await dialog.ShowDialog<AuthenticationChoice?>(this);
+        return choice == null ? throw new OperationCanceledException() : choice.Broker;
+    }
     private async Task<ImportKeys?> AskImportKeys()
     {
         var dialog = new Window { Title = "Importer un XML mRemoteNG", Width = 520, Height = 520, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };

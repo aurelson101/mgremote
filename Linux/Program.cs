@@ -14,6 +14,8 @@ internal static class Program
 {
     [STAThread] public static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] is "--credential-askpass" or "--credential-rdp") { Environment.ExitCode = CredentialBroker.RunHelper(args).GetAwaiter().GetResult(); return; }
+        if (args.Contains("--credential-stdin-fixture")) { Environment.ExitCode = Console.ReadLine() == "fixture-password" && Environment.GetEnvironmentVariable("MGREMOTE_CREDENTIAL_TOKEN") == null ? 0 : 2; return; }
         if (args.Contains("--self-test")) { SelfTest.Run(); return; }
         if (args.Contains("--terminal-fixture")) { Console.Write("\x1b[32mMGRemote embedded terminal fixture\x1b[0m\r\n"); while (Console.ReadLine() is string line) Console.WriteLine(line); return; }
         string? serialPlan = args.FirstOrDefault(a => a.StartsWith("--serial-plan=", StringComparison.Ordinal));
@@ -62,7 +64,7 @@ public sealed partial class MainWindow : Window
     private readonly Grid _sessionArea = new();
     private readonly Dictionary<Connection, TreeViewItem> _nodes = new(ReferenceEqualityComparer.Instance);
     private string[] _selectedFolder = [];
-    private sealed record SessionTab(string Name, Control Body, EmbeddedSession? Host = null, bool Closable = true);
+    private sealed record SessionTab(string Name, Control Body, EmbeddedSession? Host = null, bool Closable = true, CredentialBroker? Credentials = null);
     private readonly TextBox _name = new(), _host = new(), _user = new(), _domain = new(), _key = new();
     private readonly TextBox _jump = new() { PlaceholderText = "Alias Host dans ~/.ssh/config" }, _sharePath = new();
     private readonly CheckBox _share = new() { Content = "Partager ce dossier RDP en lecture/écriture" };
@@ -78,10 +80,10 @@ public sealed partial class MainWindow : Window
     private readonly CheckBox _multi = new() { Content = "RDP sur plusieurs écrans" };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private Connection? _editing;
-    private bool _storeLoaded = true;
+    private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.2"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.3"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = Brush.Parse("#eef1f5"); Foreground = Brush.Parse("#1f2937");
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu();
@@ -149,7 +151,7 @@ public sealed partial class MainWindow : Window
         var welcome = new Border { Padding = new Thickness(28), Child = new TextBlock { Text = "MGRemote\n\nSélectionnez une connexion pour modifier ses propriétés.\nDouble-cliquez pour ouvrir une session dans un onglet.\n\nSSH / SFTP : clés OpenSSH, vérification de clé d’hôte, Ctrl+Maj+C/V.\nRDP : authentification NLA et vérification du certificat.\nSérie : paramètres du câble console et fermeture avec l’onglet.\n\nLa parité complète avec Windows reste en développement : VNC,\nlecteurs RDP et gestion avancée des bastions\nne sont pas encore équivalents. Le multi-écran RDP utilise le mode externe.", FontSize = 16, TextWrapping = TextWrapping.Wrap } };
         AddSession(new SessionTab("General", welcome, null, false));
         Grid.SetRow(_status, 3); _status.Margin = new Thickness(8); root.Children.Add(_status); Content = root;
-        Closed += (_, _) => { foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } };
+        Closed += (_, _) => { _closing = true; foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } };
         _protocol.SelectionChanged += (_, _) => {
             UpdateProtocol();
         };
@@ -211,7 +213,7 @@ public sealed partial class MainWindow : Window
             var next = _connections.ToList(); int index = _editing == null ? -1 : next.FindIndex(c => ReferenceEquals(c, _editing));
             if (index < 0) next.Add(item); else next[index] = item;
             Connections.Save(next); _connections.Clear(); foreach (var c in next) _connections.Add(c);
-            Filter(); if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); _status.Text = "Connexion enregistrée sans mot de passe.";
+            Filter(); if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); _status.Text = "Connexion enregistrée ; les secrets importés restent chiffrés.";
         } catch (Exception ex) { _status.Text = ex.Message; }
     }
     private async Task ChooseKey()

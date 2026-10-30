@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.2 â€” work in progress
+# MGRemote Linux Desktop 0.2.3 â€” work in progress
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -32,3 +32,11 @@ After choosing an XML, enter its master password (blank uses mRemoteNG's known d
 Select a connection and choose **Secret importé…** to unlock its password temporarily. It remains masked until explicitly shown; nothing is automatically copied or sent to SSH/RDP/SFTP. Automatic credential injection, gateway passwords/access tokens and a desktop keyring are not implemented. Managed plaintext strings can remain in process memory until garbage collection; closing the dialog clears its controls but does not guarantee memory erasure.
 
 RDP gateway hostname/port and direct/detect usage are editable and imported from RDGatewayUsageMethod/RDGatewayHostname. Gateway authentication remains interactive; certificate validation and NLA remain enabled. Live gateway connections still require testing.
+
+## Development update 0.2.3: use imported secrets
+
+At connection time, unlock the imported password with the local passphrase or choose manual authentication. This also applies when starting a graphical SFTP transfer. Credentials are delivered once through a private Unix-domain socket (0700 parent, 0600 socket, random capability token), expire after 90 seconds and are removed on cancellation/closure. Passwords are absent from arguments, environment variables and plaintext files. The environment carries a temporary local IPC capability, not the password. Processes with the same UID and root remain within the local trust boundary. Managed plaintext strings remain subject to garbage collection.
+
+SSH/SFTP uses a bundled OpenSSH askpass helper, allows one password attempt, retains public-key authentication and requires StrictHostKeyChecking=yes. The broker only answers the exact destination user/host password prompt. Unknown hosts, aliases resolving to another prompt, bastion passwords, key passphrases and interactive/MFA prompts require the manual connection path. First connect manually and verify the server fingerprint through a trusted channel.
+
+Direct RDP uses FreeRDP /from-stdin:force through a child process with a private stdin pipe; the username must be configured. Certificate verification and NLA remain enabled. Gateway credentials and external/multimonitor connections remain manual. Offline tests exercise the actual askpass helper and stdin delivery to a synthetic local client, refusal of invalid tokens/wrong targets/key prompts, restrictive permissions and socket cleanup. Real server authentication still requires validation. This section supersedes the earlier manual-only credential description.

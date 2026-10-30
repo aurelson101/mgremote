@@ -49,21 +49,26 @@ public sealed partial class MainWindow
     private void CloseSession(SessionTab? tab)
     {
         if (tab == null || !tab.Closable) return;
-        _sessionArea.Children.Remove(tab.Body); _tabs.Remove(tab); tab.Host?.Dispose(); (tab.Body as IDisposable)?.Dispose(); _tabBar.SelectedItem = _tabs.LastOrDefault();
+        _sessionArea.Children.Remove(tab.Body); _tabs.Remove(tab); tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); _tabBar.SelectedItem = _tabs.LastOrDefault();
     }
-    private void Launch(bool sftp)
+    private async void Launch(bool sftp)
     {
+        CredentialBroker? credentials = null;
         try {
             var model = Read(); Connections.Validate(model);
             if (sftp && model.Protocol != "SSH") throw new ArgumentException("SFTP nécessite SSH.");
-            if (sftp) { AddSession(new SessionTab("SFTP · " + model.Name, new FileTransferPane(model))); return; }
+            if (sftp) { AddSession(new SessionTab("SFTP · " + model.Name, new FileTransferPane(model, () => UnlockConnection(model)))); return; }
             if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux X11/XWayland.");
             if (model.Protocol == "RDP" && model.MultiMonitor) throw new NotSupportedException("Le multi-écran utilise encore Sessions → Ouvrir en fenêtre externe.");
+            credentials = await UnlockConnection(model);
+            if (_closing) throw new OperationCanceledException();
+            var ownedCredentials = credentials;
             var status = new TextBlock { Text = "Initialisation…", Margin = new Thickness(8), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
-            var native = new EmbeddedSession(parent => SessionLauncher.Embedded(model, sftp, parent), text => { status.Text = text; _status.Text = text; });
+            var native = new EmbeddedSession(parent => { var start = SessionLauncher.Embedded(model, sftp, parent); ownedCredentials?.Configure(start, model.Protocol); return start; }, text => { status.Text = text; _status.Text = text; });
             var content = new Grid { RowDefinitions = new RowDefinitions("*,Auto") }; content.Children.Add(native); Grid.SetRow(status, 1); content.Children.Add(status);
-            AddSession(new SessionTab((sftp ? "SFTP · " : "") + model.Name, content, native));
-        } catch (Exception ex) { _status.Text = "Connexion : " + ex.Message; }
+            AddSession(new SessionTab((sftp ? "SFTP · " : "") + model.Name, content, native, Credentials: ownedCredentials)); credentials = null;
+        } catch (OperationCanceledException) { credentials?.Dispose(); _status.Text = "Connexion annulée."; }
+        catch (Exception ex) { credentials?.Dispose(); _status.Text = "Connexion : " + ex.Message; }
     }
     private void External() { try { SessionLauncher.Launch(Read()); _status.Text = "Session externe ouverte explicitement."; } catch (Exception ex) { _status.Text = ex.Message; } }
     private async Task Delete()

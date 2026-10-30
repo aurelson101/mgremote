@@ -8,19 +8,21 @@ namespace MGRemote.Linux;
 public sealed class FileTransferPane : UserControl, IDisposable
 {
     private readonly Connection _connection;
+    private readonly Func<Task<CredentialBroker?>>? _unlock;
+    private CredentialBroker? _credentials;
     private readonly ComboBox _direction = new() { ItemsSource = new[] { "Envoyer vers le serveur", "Télécharger depuis le serveur" }, SelectedIndex = 0 };
     private readonly TextBox _local = new() { PlaceholderText = "Fichier/dossier local, ou dossier de réception" }, _remote = new() { PlaceholderText = "/chemin/distant/absolu ou C:/chemin" };
     private readonly CheckBox _recursive = new() { Content = "Dossier / récursif" }, _overwrite = new() { Content = "J’autorise le remplacement des fichiers de même nom sur le serveur." };
-    private readonly TextBlock _status = new() { Text = "Les clés et le profil SSH sont repris de la connexion. Aucun mot de passe n’est enregistré.", TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly TextBlock _status = new() { Text = "Les clés et le profil SSH sont repris de la connexion. Les secrets importés restent chiffrés au repos.", TextWrapping = Avalonia.Media.TextWrapping.Wrap };
     private readonly Button _start = new() { Content = "Démarrer le transfert" };
     private readonly ContentControl _progress = new();
     private readonly TextBlock _destination = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
     private CancellationTokenSource? _cancel;
     private EmbeddedSession? _session;
     private bool _busy, _disposed;
-    public FileTransferPane(Connection connection)
+    internal FileTransferPane(Connection connection, Func<Task<CredentialBroker?>>? unlock = null)
     {
-        _connection = connection;
+        _connection = connection; _unlock = unlock;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Margin = new Thickness(12) };
         var form = new StackPanel { Spacing = 8 };
         form.Children.Add(new TextBlock { Text = "Transfert SFTP — " + connection.Name, FontSize = 18 }); form.Children.Add(_direction);
@@ -61,7 +63,9 @@ public sealed class FileTransferPane : UserControl, IDisposable
             _status.Text = "Vérification du client et des fichiers locaux…";
             var plan = await Task.Run(() => FileTransfer.Prepare(_connection, local, remote, download, recursive, cancel.Token), cancel.Token);
             cancel.Token.ThrowIfCancellationRequested(); if (_disposed) return;
-            _session = new EmbeddedSession(parent => SessionLauncher.Terminal(parent, plan.Executable, plan.Arguments), message => { if (!_disposed) _status.Text = message; });
+            _credentials = _unlock == null ? null : await _unlock();
+            if (_disposed || cancel.IsCancellationRequested) { _credentials?.Dispose(); _credentials = null; return; }
+            _session = new EmbeddedSession(parent => { var start = SessionLauncher.Terminal(parent, plan.Executable, plan.Arguments); _credentials?.Configure(start, "SSH"); return start; }, message => { if (!_disposed) _status.Text = message; });
             _destination.Text = download ? "Dossier de réception : " + plan.LocalTarget : "Source locale : " + plan.LocalTarget;
             _progress.Content = _session; _status.Text = "Transfert lancé. Destination locale : " + plan.LocalTarget + ". Fermez/annulez pour interrompre la session.";
         } catch (OperationCanceledException) { if (!_disposed) _status.Text = "Préparation annulée ; aucun transfert démarré."; }
@@ -70,6 +74,7 @@ public sealed class FileTransferPane : UserControl, IDisposable
     }
     private async Task Cancel()
     {
+        _credentials?.Dispose(); _credentials = null;
         _cancel?.Cancel(); var session = _session; _session = null; _progress.Content = null;
         if (session != null) { session.Dispose(); await session.ShutdownCompletion; }
         if (!_disposed) { _start.IsEnabled = !_busy; _status.Text = "Session de transfert fermée. Les fichiers partiels sont conservés."; }
@@ -81,6 +86,6 @@ public sealed class FileTransferPane : UserControl, IDisposable
     }
     public void Dispose()
     {
-        if (_disposed) return; _disposed = true; _cancel?.Cancel(); _session?.Dispose();
+        if (_disposed) return; _disposed = true; _cancel?.Cancel(); _session?.Dispose(); _credentials?.Dispose();
     }
 }

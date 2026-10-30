@@ -124,6 +124,54 @@ internal static class SelfTest
             File.WriteAllText(path, "<!DOCTYPE Connections [<!ENTITY secret SYSTEM 'file:///etc/passwd'>]><Connections>&secret;</Connections>");
             bool blocked = false; try { Connections.Import(path); } catch (System.Xml.XmlException) { blocked = true; } Check(blocked);
         } finally { File.Delete(path); }
+        if (OperatingSystem.IsLinux()) count += VerifyCredentialBroker().GetAwaiter().GetResult();
         Console.WriteLine($"PASS: {count} Linux metadata/argument/import security checks; no remote connections.");
     }
+    private static async Task<int> VerifyCredentialBroker()
+    {
+        int count = 0;
+        void Check(bool ok) { if (!ok) throw new Exception("Credential broker offline check failed at " + count); count++; }
+        string binary = Path.Combine(AppContext.BaseDirectory, "MGRemoteLinux");
+        System.Diagnostics.ProcessStartInfo Setup(CredentialBroker broker, string protocol, params string[] arguments)
+        {
+            var terminal = SessionLauncher.Terminal(1, "/usr/bin/ssh", SessionLauncher.Arguments(new Connection { Host = "server", User = "alice" })); broker.Configure(terminal, protocol);
+            if (protocol == "SSH") Check(terminal.ArgumentList.Contains("StrictHostKeyChecking=yes") && !terminal.ArgumentList.Contains("StrictHostKeyChecking=ask"));
+            var start = new System.Diagnostics.ProcessStartInfo(arguments[0]) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (string arg in arguments.Skip(1)) start.ArgumentList.Add(arg);
+            foreach (string key in new[] { "MGREMOTE_CREDENTIAL_SOCKET", "MGREMOTE_CREDENTIAL_TOKEN" }) start.Environment[key] = terminal.Environment[key];
+            Check(!string.Join(" ", terminal.ArgumentList).Contains("fixture-password") && !terminal.Environment.Values.Contains("fixture-password"));
+            return start;
+        }
+        async Task<(int Code, string Output)> Run(System.Diagnostics.ProcessStartInfo start)
+        {
+            using var process = System.Diagnostics.Process.Start(start)!;
+            try {
+                string output = await process.StandardOutput.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                return (process.ExitCode, output);
+            } catch { if (!process.HasExited) process.Kill(true); throw; }
+        }
+        var ssh = new Connection { Host = "server", User = "alice" };
+        string path;
+        using (var broker = new CredentialBroker(ssh, "fixture-password")) {
+            var invalid = Setup(broker, "SSH", Path.Combine(AppContext.BaseDirectory, "mgremote-askpass"), "alice@server's password:");
+            path = invalid.Environment["MGREMOTE_CREDENTIAL_SOCKET"]!;
+            Check((File.GetUnixFileMode(Path.GetDirectoryName(path)!) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) == 0);
+            invalid.Environment["MGREMOTE_CREDENTIAL_TOKEN"] = new string('0', 64);
+            var badToken = await Run(invalid); Check(badToken.Code != 0 && !badToken.Output.Contains("fixture-password"));
+            var otherHost = await Run(Setup(broker, "SSH", binary, "--credential-askpass", "alice@bastion's password:")); Check(otherHost.Code != 0);
+            var keyPhrase = await Run(Setup(broker, "SSH", binary, "--credential-askpass", "Enter passphrase for key '/private':")); Check(keyPhrase.Code != 0);
+            var password = await Run(Setup(broker, "SSH", Path.Combine(AppContext.BaseDirectory, "mgremote-askpass"), "alice@server's password:")); Check(password.Code == 0 && password.Output.TrimEnd() == "fixture-password");
+            await broker.Completion.WaitAsync(TimeSpan.FromSeconds(3)); Check(!File.Exists(path));
+        }
+        Check(!Directory.Exists(Path.GetDirectoryName(path)));
+        using (var broker = new CredentialBroker(ssh with { Protocol = "RDP" }, "fixture-password")) {
+            var delivered = await Run(Setup(broker, "RDP", binary, "--credential-rdp", binary, "--credential-stdin-fixture"));
+            Check(delivered.Code == 0 && !delivered.Output.Contains("fixture-password"));
+            await broker.Completion.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        var cancelled = new CredentialBroker(ssh, "fixture-password"); cancelled.Dispose(); await cancelled.Completion.WaitAsync(TimeSpan.FromSeconds(3)); Check(true);
+        return count;
+    }
+
 }

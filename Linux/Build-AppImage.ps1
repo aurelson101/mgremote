@@ -1,6 +1,6 @@
 # Build an isolated AppImage; does not install software or alter the Windows fork.
 [CmdletBinding()]
-param([string]$SquashfsTool, [string]$Version = '0.2.2')
+param([string]$SquashfsTool, [string]$Version = '0.2.3')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid version.' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -15,6 +15,7 @@ New-Item -ItemType Directory -Force $binary | Out-Null
 & dotnet publish (Join-Path $PSScriptRoot 'MGRemote.Linux.csproj') -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=false -o $binary
 if ($LASTEXITCODE -ne 0) { throw 'Linux publish failed.' }
 $utf8 = [Text.UTF8Encoding]::new($false)
+[IO.File]::WriteAllText((Join-Path $binary 'mgremote-askpass'), (Get-Content (Join-Path $PSScriptRoot 'mgremote-askpass') -Raw).Replace("`r`n","`n"), $utf8)
 $launcher = @'
 #!/bin/sh
 set -eu
@@ -46,7 +47,7 @@ Invoke-WebRequest 'https://github.com/AppImage/type2-runtime/releases/download/c
 $runtimeHash = '617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46'
 if ((Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash -ne $runtimeHash) { throw 'AppImage runtime changed: verify a new trusted upstream digest before updating the pin.' }
 $squash = Join-Path $release 'filesystem.squashfs'
-& $SquashfsTool $appdir $squash -noappend -no-xattrs -all-root -comp gzip -p 'AppRun m 755 0 0' -p 'usr/bin/MGRemoteLinux m 755 0 0'
+& $SquashfsTool $appdir $squash -noappend -no-xattrs -all-root -comp gzip -p 'AppRun m 755 0 0' -p 'usr/bin/MGRemoteLinux m 755 0 0' -p 'usr/bin/mgremote-askpass m 755 0 0'
 if ($LASTEXITCODE -ne 0) { throw 'SquashFS creation failed.' }
 $image = Join-Path $release "MGRemote-Linux-$Version-x86_64.AppImage"
 $output = [IO.File]::Open($image, [IO.FileMode]::CreateNew)
@@ -58,7 +59,7 @@ $source = Join-Path $release "MGRemote-Linux-$Version-source.zip"
 $sourceTree = Join-Path $release 'source-tree'
 $linuxSource = Join-Path $sourceTree 'Linux'
 New-Item -ItemType Directory -Force $linuxSource | Out-Null
-foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','XmlSecrets.cs','MainWindow.Secrets.cs','Program.cs','MainWindow.Sessions.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Build-AppImage.ps1','README.md','Licenses')) {
+foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','CredentialBroker.cs','mgremote-askpass','XmlSecrets.cs','MainWindow.Secrets.cs','Program.cs','MainWindow.Sessions.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Build-AppImage.ps1','README.md','Licenses')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $linuxSource -Recurse
 }
 Copy-Item -LiteralPath (Join-Path $root 'COPYING.txt') -Destination $sourceTree
