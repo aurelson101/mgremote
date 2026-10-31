@@ -1,10 +1,10 @@
-# MGRemote Linux Desktop 0.2.10 — development preview
+# MGRemote Linux Desktop 0.2.11 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
 Implemented here: connection/folder tree preserving XML container paths; configuration below the tree; resizable panes; File/Sessions/View/Tools/Help menus; closeable session tabs. SSH, SFTP command-line, serial and the FreeRDP parent-window path use embedded X11 clients. Xterm provides a real PTY, ANSI terminal and Ctrl+Shift+C/V clipboard bindings. Switching tabs keeps their native hosts mounted. Closing a tab terminates its owned client tree. SSH host-key checks, NLA and certificate verification remain enabled; no plaintext passwords are stored or passed as command-line arguments.
 
-Dependencies: Linux X11/XWayland, Avalonia native libraries, xterm, OpenSSH, FreeRDP and picocom for serial. The .NET runtime is bundled. Native Wayland is not supported by the embedding layer. Multimonitor RDP still requires the explicit external-window action.
+Dependencies: Linux X11/XWayland, Avalonia native libraries, OpenSSH, FreeRDP and picocom for serial. The .NET runtime and xterm (with its terminal-specific libraries) are bundled. OpenSSH, FreeRDP and desktop libraries remain system dependencies. Native Wayland is not supported by the embedding layer. Multimonitor RDP still requires the explicit external-window action.
 
 Incomplete parity: embedded VNC, advanced RDP gateway/monitor options, interactive bastion management, encrypted XML/vault migration and optional AnyDesk integration. Some platform-specific Windows behavior will require native Linux equivalents rather than Windows DLLs.
 
@@ -90,3 +90,9 @@ To move saved connections to another Linux computer, select **Fichier → Export
 Copy this file to the other computer and use **Fichier → Importer un profil chiffré…** with its passphrase. Existing saved connections remain; exact duplicates are skipped. If the local profile is unencrypted, **Chiffrer le profil local avec cette phrase** is selected by default and can be unchecked. An already encrypted local profile keeps its existing key/passphrase. Wrong phrases, altered archives and cancellation preserve the local profile. Windows 0.1.15 does not implement this Linux profile format.
 
 Only saved connections, folders and configuration are included. Private SSH key files, certificates, OpenSSH config aliases, shared folders and serial devices are not packaged; their paths/settings are preserved and must be checked on the destination PC. Previously imported connection passwords remain encrypted with their original local secret phrase, which may also be needed when connecting. Share the export passphrase separately from the file and keep it securely: there is no recovery.
+
+## Development update 0.2.11: SSH startup and key selection
+
+The key action immediately opens a dialog with a direct path field, including `~/.ssh/...`; the system file chooser is optional. Invalid paths, public keys, PPK files and unsafe permissions display an inline error. Selection stores a reference to the existing key; save the connection to persist it.
+
+The AppImage includes xterm and its terminal-specific libraries, built for Ubuntu 24.04 x86-64, with pinned SHA-256 package/source hashes from signed Ubuntu indexes. System xterm takes precedence when installed. The bundle includes copyright notices and corresponding source under `usr/bin/terminal`. Packaging requires Linux, Python 3.11+, dpkg-deb and the existing .NET/SquashFS tools. No packages are installed on the build host. Missing session prerequisites are checked before creating a session tab and shown in a dialog.

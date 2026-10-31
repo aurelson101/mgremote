@@ -1,6 +1,6 @@
 # Build an isolated AppImage; does not install software or alter the Windows fork.
 [CmdletBinding()]
-param([string]$SquashfsTool, [string]$Version = '0.2.10')
+param([string]$SquashfsTool, [string]$Version = '0.2.11')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid version.' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -14,6 +14,8 @@ $binary = Join-Path $appdir 'usr/bin'
 New-Item -ItemType Directory -Force $binary | Out-Null
 & dotnet publish (Join-Path $PSScriptRoot 'MGRemote.Linux.csproj') -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=false -o $binary
 if ($LASTEXITCODE -ne 0) { throw 'Linux publish failed.' }
+& python3 (Join-Path $PSScriptRoot 'Bundle-Terminal.py') $binary
+if ($LASTEXITCODE -ne 0) { throw 'Terminal bundle failed.' }
 $utf8 = [Text.UTF8Encoding]::new($false)
 [IO.File]::WriteAllText((Join-Path $binary 'mgremote-askpass'), (Get-Content (Join-Path $PSScriptRoot 'mgremote-askpass') -Raw).Replace("`r`n","`n"), $utf8)
 $launcher = @'
@@ -59,7 +61,7 @@ $source = Join-Path $release "MGRemote-Linux-$Version-source.zip"
 $sourceTree = Join-Path $release 'source-tree'
 $linuxSource = Join-Path $sourceTree 'Linux'
 New-Item -ItemType Directory -Force $linuxSource | Out-Null
-foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','CredentialBroker.cs','mgremote-askpass','XmlSecrets.cs','MainWindow.Secrets.cs','Program.cs','MainWindow.Sessions.cs','MainWindow.Tree.cs','MainWindow.TreeState.cs','MainWindow.Desktop.cs','MainWindow.Configuration.cs','MainWindow.Appearance.cs','DesktopAppearance.cs','MainWindow.Profile.cs','ProfileEncryption.cs','ProfileTransfer.cs','ProfileTransferTests.cs','MainWindow.ProfileTransfer.cs','MainWindow.ProfileTransfer.Tests.cs','ProfileEncryptionTests.cs','ConnectionIcons.cs','ConnectionSettingsTests.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Build-AppImage.ps1','README.md','Licenses')) {
+foreach ($name in @('MGRemote.Linux.csproj','Connections.cs','CredentialBroker.cs','mgremote-askpass','XmlSecrets.cs','MainWindow.Secrets.cs','Program.cs','MainWindow.Sessions.cs','MainWindow.Tree.cs','MainWindow.TreeState.cs','MainWindow.Desktop.cs','MainWindow.Configuration.cs','MainWindow.Appearance.cs','DesktopAppearance.cs','MainWindow.Profile.cs','ProfileEncryption.cs','ProfileTransfer.cs','ProfileTransferTests.cs','MainWindow.ProfileTransfer.cs','MainWindow.ProfileTransfer.Tests.cs','ProfileEncryptionTests.cs','ConnectionIcons.cs','ConnectionSettingsTests.cs','EmbeddedSession.cs','FileTransfer.cs','FileTransferPane.cs','SelfTest.cs','Test-Serial.py','Bundle-Terminal.py','TerminalPackages.json','Build-AppImage.ps1','README.md','Licenses')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $linuxSource -Recurse
 }
 Copy-Item -LiteralPath (Join-Path $root 'COPYING.txt') -Destination $sourceTree

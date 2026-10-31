@@ -290,6 +290,7 @@ public static class SessionLauncher
     }
     internal static string Find(params string[] names)
     {
+        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux.");
         foreach (string name in names) foreach (string prefix in new[] { "/usr/bin", "/bin" }) {
             string file = Path.Combine(prefix, name);
             if (!File.Exists(file)) continue;
@@ -297,7 +298,38 @@ public static class SessionLauncher
             if ((File.GetUnixFileMode(resolved) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0) continue;
             return file;
         }
-        throw new FileNotFoundException("Composant Linux manquant : " + string.Join(" / ", names));
+        if (names.Contains("xterm")) {
+            string bundled = Path.Combine(AppContext.BaseDirectory, "terminal", "xterm");
+            if (File.Exists(bundled) && new FileInfo(bundled).LinkTarget == null &&
+                (File.GetUnixFileMode(bundled) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) == 0) return bundled;
+        }
+        throw new FileNotFoundException("Composant Linux manquant : " + string.Join(" / ", names) + ". Installez ce composant avec le gestionnaire de paquets de votre distribution.");
+    }
+    internal static string IdentityPath(string path)
+    {
+        path = path.Trim();
+        if (path.StartsWith("~/", StringComparison.Ordinal)) path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..]);
+        if (!Path.IsPathFullyQualified(path)) throw new IOException("Saisissez le chemin absolu de la clé privée (ou ~/.ssh/id_ed25519).");
+        return Path.GetFullPath(path);
+    }
+    internal static void ValidateIdentityFile(string path)
+    {
+        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux.");
+        var identity = new FileInfo(path);
+        if (!Path.IsPathFullyQualified(path) || !identity.Exists || identity.LinkTarget != null || identity.Length is < 1 or > 1048576) throw new IOException("Choisissez une clé privée locale Linux existante (1 Mio maximum, sans lien symbolique).");
+        if ((File.GetUnixFileMode(path) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
+            throw new IOException("La clé privée doit être accessible uniquement à son propriétaire (permissions 600). Corrigez ses permissions avant de la sélectionner.");
+        using var key = File.OpenText(path);
+        var header = new char[100];
+        string marker = new string(header, 0, key.Read(header, 0, header.Length)).Split('\n')[0].TrimEnd('\r');
+        if (!marker.StartsWith("-----BEGIN ", StringComparison.Ordinal) || !marker.EndsWith("PRIVATE KEY-----", StringComparison.Ordinal))
+            throw new IOException("Clé privée OpenSSH/PEM requise. Une clé publique (.pub) ne convient pas ; convertissez les clés PuTTY (.ppk) au format OpenSSH.");
+    }
+    internal static void Preflight(Connection c)
+    {
+        ValidateIdentity(c);
+        _ = Find("xterm");
+        _ = Executable(c, false);
     }
     internal static void ValidateIdentity(Connection c)
     {
@@ -306,14 +338,7 @@ public static class SessionLauncher
         if (c.Protocol == "RDP" && c.RdpShareEnabled && (!Directory.Exists(c.RdpSharePath) || new DirectoryInfo(c.RdpSharePath).LinkTarget != null))
             throw new IOException("Le dossier à partager en RDP doit exister et ne pas être un lien symbolique.");
         if (c.Identity.Length > 0 && c.Protocol == "SSH") {
-            var identity = new FileInfo(c.Identity);
-            if (!Path.IsPathFullyQualified(c.Identity) || !identity.Exists || identity.LinkTarget != null || identity.Length is < 1 or > 1048576) throw new IOException("Choisissez une clé privée locale Linux existante (1 Mio maximum).");
-            if ((File.GetUnixFileMode(c.Identity) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
-                throw new IOException("La clé privée doit être accessible uniquement à son propriétaire (chmod 600).");
-            using var key = File.OpenText(c.Identity);
-            var header = new char[100];
-            string? marker = new string(header, 0, key.Read(header, 0, header.Length)).Split('\n')[0].TrimEnd('\r');
-            if (marker == null || !marker.StartsWith("-----BEGIN ") || !marker.EndsWith("PRIVATE KEY-----")) throw new IOException("Format OpenSSH/PEM requis ; les clés PuTTY PPK doivent être converties.");
+            ValidateIdentityFile(c.Identity);
         }
         if (c.CertificateFile.Length > 0 && c.Protocol == "SSH") {
             var certificate = new FileInfo(c.CertificateFile);
@@ -333,7 +358,7 @@ public static class SessionLauncher
         ValidateIdentity(c);
         var arguments = Arguments(c, sftp);
         // xterm stays in the foreground; desktop terminal launchers may detach through D-Bus.
-        var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
+        var start = TerminalStart();
         foreach (string arg in new[] { "-hold", "-xrm", "XTerm*allowWindowOps: false", "-xrm", ClipboardTranslations, "-title", "MGRemote · " + c.Name, "-e", Executable(c, sftp) }) start.ArgumentList.Add(arg);
         foreach (var arg in arguments) start.ArgumentList.Add(arg);
         return start;
@@ -350,11 +375,22 @@ public static class SessionLauncher
     }
     internal static ProcessStartInfo Terminal(uint parent, string executable, IEnumerable<string> arguments)
     {
-        var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
+        var start = TerminalStart();
         start.ArgumentList.Add("-hold"); // Keep connection errors/output readable after the client exits.
         start.ArgumentList.Add("-xrm"); start.ArgumentList.Add("XTerm*allowWindowOps: false");
         foreach (string arg in new[] { "-into", parent.ToString(System.Globalization.CultureInfo.InvariantCulture), "-bg", "#181a1f", "-fg", "#e6e6e6", "-fa", "Monospace", "-fs", "11", "-sl", "5000", "-xrm", ClipboardTranslations, "-e", executable }) start.ArgumentList.Add(arg);
         foreach (var arg in arguments) start.ArgumentList.Add(arg);
+        return start;
+    }
+    private static ProcessStartInfo TerminalStart()
+    {
+        var start = new ProcessStartInfo(Find("xterm")) { UseShellExecute = false };
+        if (start.FileName == Path.Combine(AppContext.BaseDirectory, "terminal", "xterm")) {
+            string libraries = Path.GetDirectoryName(start.FileName)!;
+            start.Environment.TryGetValue("LD_LIBRARY_PATH", out string? existing);
+            start.Environment["LD_LIBRARY_PATH"] = libraries + (string.IsNullOrEmpty(existing) ? "" : ":" + existing);
+        }
+        start.ArgumentList.Add("-ut"); // No utmp helper or elevated terminal permissions.
         return start;
     }
 }

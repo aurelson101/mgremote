@@ -92,6 +92,7 @@ public sealed partial class MainWindow
             if (sftp && model.Protocol != "SSH") throw new ArgumentException("SFTP nécessite SSH.");
             if (sftp) { AddSession(new SessionTab("SFTP · " + model.Name, new FileTransferPane(model, () => UnlockConnection(model)))); return; }
             if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux X11/XWayland.");
+            SessionLauncher.Preflight(model);
             credentials = await UnlockConnection(model);
             if (_closing) throw new OperationCanceledException();
             RequireLoadedProfile();
@@ -107,7 +108,14 @@ public sealed partial class MainWindow
             var content = new Grid { RowDefinitions = new RowDefinitions("*,Auto") }; content.Children.Add(native); Grid.SetRow(status, 1); content.Children.Add(status);
             AddSession(new SessionTab((sftp ? "SFTP · " : "") + model.Name, content, native, Credentials: ownedCredentials)); credentials = null;
         } catch (OperationCanceledException) { credentials?.Dispose(); _status.Text = "Connexion annulée."; }
-        catch (Exception ex) { credentials?.Dispose(); _status.Text = "Connexion : " + ex.Message; }
+        catch (Exception ex) {
+            credentials?.Dispose(); _status.Text = "Connexion : " + ex.Message;
+            var dialog = new Window { Title = "Connexion impossible", Width = 500, Height = 230, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new StackPanel { Margin = new Thickness(18), Spacing = 16 };
+            panel.Children.Add(new TextBlock { Text = ex.Message, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+            panel.Children.Add(Button("Fermer", () => dialog.Close())); dialog.Content = panel;
+            if (!_closing) await dialog.ShowDialog(this);
+        }
     }
     private async void External()
     {
