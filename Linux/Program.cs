@@ -35,7 +35,7 @@ public sealed class App : Application
     {
         var theme = new FluentTheme();
         theme.Palettes[Avalonia.Styling.ThemeVariant.Light] = new ColorPaletteResources { Accent = Color.Parse("#62788d") };
-        Styles.Add(theme); RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Light; DesktopAppearance.Apply(this);
+        Styles.Add(theme); RequestedThemeVariant = DesktopAppearance.Dark ? Avalonia.Styling.ThemeVariant.Dark : Avalonia.Styling.ThemeVariant.Light; DesktopAppearance.Apply(this);
     }
     public override void OnFrameworkInitializationCompleted()
     {
@@ -109,7 +109,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         _defaultProfilePath = _dataPath;
-        Title = "MGRemote — Linux Desktop 0.2.20"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 13;
+        Title = "MGRemote — Linux Desktop 0.2.21"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 13;
         Background = Workspace; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Workspace };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
@@ -118,7 +118,7 @@ public sealed partial class MainWindow : Window
         menus.ItemsSource = new[] {
             Group("Fichier", Entry("Nouvelle connexion", NewConnectionFromTree), Entry("Dupliquer la connexion", Duplicate), Entry("Importer mRemoteNG XML…", async () => await Import()), _importProfileItem, _exportProfileItem, Entry("Enregistrer", Save), Entry("Changer / gérer les profils…", async () => await SwitchProfile()), Entry("Chiffrer / déverrouiller le profil…", async () => await ManageProfile()), _lockProfileItem, Entry("Quitter", Close)),
             Group("Sessions", Entry("Connecter", () => Launch(false)), Entry("Transfert SFTP", () => Launch(true)), Entry("Ouvrir en fenêtre externe", External), Entry("Fermer la session", () => CloseSession(_tabBar.SelectedItem as SessionTab))),
-            Group("Affichage", Entry("Accueil", () => _tabBar.SelectedItem = _tabs.FirstOrDefault())),
+            Group("Affichage", Entry("Accueil", () => _tabBar.SelectedItem = _tabs.FirstOrDefault()), ThemeEntry()),
             Group("Outils", Entry("Console série", () => { New(); _protocol.SelectedIndex = 2; _host.Focus(); }), Entry("Choisir une clé SSH…", async () => await ChooseKey())),
             Group("Aide", Entry("Guide d’utilisation", ShowHelp), Entry("À propos…", async () => await ShowAbout()))
         };
@@ -136,9 +136,9 @@ public sealed partial class MainWindow : Window
         var body = new Grid { ColumnDefinitions = new ColumnDefinitions("360,4,*") }; Grid.SetRow(body, 2);
         body.ColumnDefinitions[0].MinWidth = 320; body.ColumnDefinitions[2].MinWidth = 420;
         var sidebar = new Grid { RowDefinitions = new RowDefinitions("2*,4,3*") };
-        var treePanel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Brushes.White };
+        var treePanel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = DesktopAppearance.Surface };
         treePanel.Children.Add(DockTitle("Connexions", true));
-        var treeStrip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(3, 1), Background = Brush.Parse("#f6f6f8") }; treeStrip.Classes.Add("toolstrip");
+        var treeStrip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(3, 1), Background = DesktopAppearance.Tone("#f6f6f8") }; treeStrip.Classes.Add("toolstrip");
         void Strip(string tip, string path, Action action) { var b = Button("", action); b.Content = ToolbarGlyph(path); b.MinWidth = 28; b.Padding = new Thickness(5, 3); ToolTip.SetTip(b, tip); Avalonia.Automation.AutomationProperties.SetName(b, tip); treeStrip.Children.Add(b); }
         Strip("Nouvelle connexion", "M2 2H13V18H2Z M6 7H17 M11 2V12", NewConnectionFromTree); Strip("Nouveau dossier", "M2 5H8L10 7H20V18H2Z", async () => await CreateFolderDialog());
         void SetExpanded(bool open) { foreach (var node in Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(_list).OfType<TreeViewItem>().ToArray()) node.IsExpanded = open; }
@@ -173,9 +173,9 @@ public sealed partial class MainWindow : Window
         InstallTreeMenu();
         _search.TextChanged += (_, _) => RequestFilter();
         var horizontal = new GridSplitter { Height = 4, Background = PanelLine, HorizontalAlignment = HorizontalAlignment.Stretch }; Grid.SetRow(horizontal, 1); sidebar.Children.Add(horizontal);
-        var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Brushes.White };
+        var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = DesktopAppearance.Surface };
         _profileEditor = editor;
-        editor.Classes.Add("properties"); _configurationTitle.Foreground = Brush.Parse("#2b3a55"); _configurationTitle.FontWeight = FontWeight.Normal; editor.Children.Add(DockCaption(_configurationTitle, false));
+        editor.Classes.Add("properties"); _configurationTitle.Foreground = DesktopAppearance.Tone("#2b3a55"); _configurationTitle.FontWeight = FontWeight.Normal; editor.Children.Add(DockCaption(_configurationTitle, false));
         var propertyToolbar = PropertyToolbar(); Grid.SetRow(propertyToolbar, 1); editor.Children.Add(propertyToolbar);
         var fields = new StackPanel { Spacing = 0 };
         var displayFields = new StackPanel { Spacing = 0 };
@@ -220,7 +220,7 @@ public sealed partial class MainWindow : Window
         var statusTip = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 560 };
         statusTip.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(TextBlock.Text)) { Source = _status }); ToolTip.SetTip(_status, statusTip);
         _status.Margin = new Thickness(10, 0); _status.FontSize = 12;
-        var statusBar = new Border { Background = Brushes.White, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 1, 0, 0), Child = new StackPanel { Children = { DockTitle("Notifications"), new Border { Height = 28, Child = _status } } } };
+        var statusBar = new Border { Background = DesktopAppearance.Surface, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 1, 0, 0), Child = new StackPanel { Children = { DockTitle("Notifications"), new Border { Height = 28, Child = _status } } } };
         Grid.SetRow(statusBar, 3); root.Children.Add(statusBar); Content = root;
         Closed += (_, _) => { _closing = true; ForgetTreeState(); _profileKey?.Dispose(); foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } CleanupSmokeStore(); };
         _protocol.SelectionChanged += (_, _) => {
@@ -228,8 +228,8 @@ public sealed partial class MainWindow : Window
         };
         if (App.Smoke) _status.Text = "Prêt — validation locale.";
         else { _storeLoaded = false; Opened += async (_, _) => await InitializeProfile(); }
-        foreach (var input in new[] { _description, _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = Brushes.White; input.Foreground = Foreground; input.FontSize = 13; }
-        _list.Background = Brushes.White; _list.Foreground = Foreground; Filter();
+        foreach (var input in new[] { _description, _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = DesktopAppearance.Surface; input.Foreground = Foreground; input.FontSize = 13; }
+        _list.Background = DesktopAppearance.Surface; _list.Foreground = Foreground; Filter();
         InstallShortcuts(); New(); UpdateProfileActions(); InstallAutoSave();
     }
     private static Button Button(string title, Action action)
@@ -240,10 +240,10 @@ public sealed partial class MainWindow : Window
     private static void Add(Panel panel, string label, Control control)
     {
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("128,*"), MinHeight = 30 };
-        row.Children.Add(new Border { Background = Brush.Parse("#f5f6f8"), BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 1, 0), Padding = new Thickness(8, 3), Child = new TextBlock { Text = label, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center } });
+        row.Children.Add(new Border { Background = DesktopAppearance.Tone("#f5f6f8"), BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 1, 0), Padding = new Thickness(8, 3), Child = new TextBlock { Text = label, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center } });
         ToolTip.SetTip(row.Children[0], label);
         control.HorizontalAlignment = HorizontalAlignment.Stretch; control.VerticalAlignment = VerticalAlignment.Stretch; Grid.SetColumn(control, 1); row.Children.Add(control);
-        panel.Children.Add(new Border { BorderBrush = Brush.Parse("#e7eaee"), BorderThickness = new Thickness(0, 0, 0, 1), Child = row });
+        panel.Children.Add(new Border { BorderBrush = DesktopAppearance.Tone("#e7eaee"), BorderThickness = new Thickness(0, 0, 0, 1), Child = row });
     }
     private void New()
     {

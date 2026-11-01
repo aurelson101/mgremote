@@ -30,14 +30,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image=$(find artifacts/linux/0.2.20 -type f -name '*.AppImage' -print -quit)
+          image=$(find artifacts/linux/0.2.21 -type f -name '*.AppImage' -print -quit)
           export APPIMAGE_EXTRACT_AND_RUN=1
           "$image" --self-test
           xvfb-run -a "$image" --smoke-ui="$GITHUB_WORKSPACE/artifacts/linux-gui.png"
           python3 Linux/Test-Serial.py "$image"
           python3 - <<'PY'
           import json,pathlib,hashlib
-          folder=next(pathlib.Path('artifacts/linux/0.2.20').iterdir())
+          folder=next(pathlib.Path('artifacts/linux/0.2.21').iterdir())
           path=folder/'manifest.json'
           data=json.loads(path.read_text(encoding='utf-8-sig'))
           image=folder/data['AppImage']
@@ -53,9 +53,9 @@ jobs:
         with:
           name: mgremote-linux-validated
           path: |
-            artifacts/linux/0.2.20/*/*.AppImage
-            artifacts/linux/0.2.20/*/*-source.zip
-            artifacts/linux/0.2.20/*/manifest.json
+            artifacts/linux/0.2.21/*/*.AppImage
+            artifacts/linux/0.2.21/*/*-source.zip
+            artifacts/linux/0.2.21/*/manifest.json
             artifacts/linux-gui.png
             artifacts/linux-gui-compact.png
             artifacts/linux-gui-export.png

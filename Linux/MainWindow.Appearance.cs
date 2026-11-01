@@ -11,13 +11,13 @@ using Avalonia.VisualTree;
 namespace MGRemote.Linux;
 public sealed partial class MainWindow
 {
-    private static readonly IBrush PanelLine = Brush.Parse("#d6dbe1");
-    internal static readonly IBrush Workspace = Brush.Parse("#eeeef2");
-    private static readonly IBrush ActiveCaption = Brush.Parse("#007acc"), InactiveCaption = Brush.Parse("#cfd6e5");
+    private static readonly IBrush PanelLine = DesktopAppearance.Tone("#d6dbe1");
+    internal static readonly IBrush Workspace = DesktopAppearance.Tone("#eeeef2");
+    private static readonly IBrush ActiveCaption = DesktopAppearance.Tone("#007acc"), InactiveCaption = DesktopAppearance.Tone("#cfd6e5");
     // Dock caption in the Windows style: blue when active, pale slate otherwise, with pin/close glyphs.
     private static Border DockCaption(Control title, bool active)
     {
-        var ink = active ? Brushes.White : Brush.Parse("#2b3a55");
+        var ink = active ? Brushes.White : DesktopAppearance.Tone("#2b3a55");
         var glyphs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         glyphs.Children.Add(new Avalonia.Controls.Shapes.Path { Data = Geometry.Parse("M3 1H8 M4 1V5L2 7H9L7 5V1 M5.5 7V11"), Stroke = ink, StrokeThickness = 1.1, Width = 11, Height = 12 });
         glyphs.Children.Add(new Avalonia.Controls.Shapes.Path { Data = Geometry.Parse("M1 1L9 9 M9 1L1 9"), Stroke = ink, StrokeThickness = 1.3, Width = 10, Height = 10 });
@@ -26,10 +26,10 @@ public sealed partial class MainWindow
         return new Border { Background = active ? ActiveCaption : InactiveCaption, Child = row, MinHeight = 26 };
     }
     private static Control DockTitle(string title, bool active = false)
-        => DockCaption(new TextBlock { Text = title, FontSize = 13, Foreground = active ? Brushes.White : Brush.Parse("#2b3a55"), Margin = new Thickness(8, 4), VerticalAlignment = VerticalAlignment.Center }, active);
+        => DockCaption(new TextBlock { Text = title, FontSize = 13, Foreground = active ? Brushes.White : DesktopAppearance.Tone("#2b3a55"), Margin = new Thickness(8, 4), VerticalAlignment = VerticalAlignment.Center }, active);
     private static Image ToolbarGlyph(string path, int size = 16)
         => new() { Width = size, Height = size, Source = new DrawingImage { Drawing = new GeometryDrawing {
-            Geometry = Geometry.Parse(path), Pen = new Pen(Brush.Parse("#65717e"), 1.4)
+            Geometry = Geometry.Parse(path), Pen = new Pen(DesktopAppearance.Tone("#65717e"), 1.4)
         } } };
     private static Button ToolButton(string label, string tooltip, string path, Action action)
     {
@@ -53,11 +53,11 @@ public sealed partial class MainWindow
         group.Template = new FuncControlTemplate<Expander>((owner, _) => {
             var heading = new ToggleButton {
                 Height = 30, MinHeight = 30, Padding = new Thickness(6, 0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0),
-                Background = Brush.Parse("#e9edf1"), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch
+                Background = DesktopAppearance.Tone("#e9edf1"), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch
             };
             heading.Classes.Add("category-header");
             var arrow = new Avalonia.Controls.Shapes.Path {
-                Data = Geometry.Parse("M1 2L5 6L9 2"), Stroke = Brush.Parse("#65717e"), StrokeThickness = 1.4,
+                Data = Geometry.Parse("M1 2L5 6L9 2"), Stroke = DesktopAppearance.Tone("#65717e"), StrokeThickness = 1.4,
                 Width = 10, Height = 8, VerticalAlignment = VerticalAlignment.Center,
                 RenderTransform = new RotateTransform(owner.IsExpanded ? 0 : -90)
             };
@@ -71,6 +71,15 @@ public sealed partial class MainWindow
             body.Bind(IsVisibleProperty, new Binding(nameof(Expander.IsExpanded)) { Source = owner });
             var panel = new StackPanel(); panel.Children.Add(heading); panel.Children.Add(body); return panel;
         });
+    }
+    private MenuItem ThemeEntry()
+    {
+        var item = new MenuItem { Header = "Mode sombre (au prochain démarrage)", ToggleType = MenuItemToggleType.CheckBox, IsChecked = DesktopAppearance.Dark };
+        item.Click += (_, _) => {
+            try { DesktopAppearance.SavePreference(item.IsChecked); _status.Text = item.IsChecked ? "Mode sombre enregistré : redémarrez MGRemote pour l’appliquer." : "Mode clair enregistré : redémarrez MGRemote pour l’appliquer."; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _status.Text = "Préférence d’apparence non enregistrée : " + ex.Message; }
+        };
+        return item;
     }
     private Control EmptyWorkspace()
     {

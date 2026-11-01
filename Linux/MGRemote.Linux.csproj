@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AssemblyName>MGRemoteLinux</AssemblyName>
-    <Version>0.2.20</Version>
+    <Version>0.2.21</Version>
   </PropertyGroup>
   <ItemGroup>
     <None Update="mgremote-askpass" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
