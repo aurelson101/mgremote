@@ -109,7 +109,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         _defaultProfilePath = _dataPath;
-        Title = "MGRemote — Linux Desktop 0.2.19"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 13;
+        Title = "MGRemote — Linux Desktop 0.2.20"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 13;
         Background = Workspace; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Workspace };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");

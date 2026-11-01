@@ -24,6 +24,9 @@ public sealed partial class FileTransferPane : UserControl, IDisposable
     private bool _busy, _disposed;
     private bool SessionActive => _session != null && _session.ExitCode == null && !_session.StartupFailed;
     private Task _operation = Task.CompletedTask;
+    // Last remote folder and receive folder per user@host:port, so repeated transfers need no retyping.
+    private static readonly Dictionary<string, (string Remote, string Local)> Recent = [];
+    private string RecentKey => _connection.User + "@" + _connection.Host + ":" + _connection.Port;
     private string? _localTarget;
     private string? _receivedFolder;
     internal Task ShutdownCompletion { get; private set; } = Task.CompletedTask;
@@ -69,6 +72,8 @@ public sealed partial class FileTransferPane : UserControl, IDisposable
             catch (Exception ex) { _status.Text = ex.Message; }
             e.Handled = true;
         });
+        if (Recent.TryGetValue(RecentKey, out var last)) { _remote.Text = last.Remote; if (last.Local.Length > 0 && Directory.Exists(last.Local)) _status.Text = "Dernier dossier distant restauré : " + last.Remote; }
+        _start.Classes.Add("primary-action");
         DetachedFromVisualTree += (_, _) => Dispose();
     }
     private IClipboard Clipboard() => TopLevel.GetTopLevel(this)?.Clipboard ?? throw new IOException("Presse-papiers indisponible.");
@@ -127,6 +132,7 @@ public sealed partial class FileTransferPane : UserControl, IDisposable
             if (!download && _overwrite.IsChecked != true) throw new ArgumentException("Confirmez le remplacement éventuel des fichiers sur le serveur avant l’envoi.");
             string local = _local.Text?.Trim() ?? "", remote = _remote.Text?.Trim() ?? "";
             string[] sources = download ? [] : FileTransfer.Sources(local);
+            if (!download && sources.Any(Directory.Exists)) { recursive = true; _recursive.IsChecked = true; }
             if (download) { local = SessionLauncher.IdentityPath(local); _ = FileTransfer.Arguments(_connection, local, remote, true, recursive); }
             else _ = FileTransfer.UploadArguments(_connection, sources, remote, recursive);
             _status.Text = "Vérification du client et des fichiers locaux…";
@@ -147,6 +153,7 @@ public sealed partial class FileTransferPane : UserControl, IDisposable
                 _credentials?.Dispose(); _credentials = null;
                 _start.IsEnabled = true; EnableInputs(true); _status.Text = "Transfert non démarré : " + message;
             };
+            if (remote.Length > 0) Recent[RecentKey] = (remote, download ? plan.LocalTarget : "");
             _localTarget = download ? plan.LocalTarget : Path.GetDirectoryName(sources[0]);
             if (download) _receivedFolder = plan.LocalTarget;
             _destination.Text = download ? "Dossier de réception : " + plan.LocalTarget : sources.Length + " élément(s) locaux à envoyer.";
