@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.17 — development preview
+# MGRemote Linux Desktop 0.2.18 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -130,3 +130,15 @@ RDP text/image clipboard remains available. The explicit bidirectional file mode
 SSH terminals now copy a left-button text selection to both PRIMARY and CLIPBOARD when the button is released. Right-click pastes CLIPBOARD without appending Enter; Ctrl+Shift+C/V and normal middle-button behavior remain available. Hold Shift when a remote application captures mouse events, as described in the [xterm manual](https://invisible-island.net/xterm/manpage/xterm.html). RDP keeps the remote application’s native right-click Copy/Paste menus and the existing clipboard settings.
 
 SFTP fields now expose right-click text and file/folder commands. Copy local files or the latest received directory to the system clipboard, then paste through the local file manager. The received directory can contain partial files if the transfer was interrupted. These clipboard actions do not start transfers.
+
+## Development update 0.2.18: desktop polish and session recovery
+
+The desktop now uses a consistent readable font, wider property labels, a useful home screen, a clearer Connect action and a fixed status bar with the full message in a tooltip. Transfer commands stay outside the scrolling SFTP form. Initial embedded-terminal font size follows the window DPI; main/compact captures preserve the rendering scale.
+
+Held terminals now report the actual child-client exit through a private temporary directory (0700) and an atomically published code-only file (0600). Passwords and client output are not written to that report. SFTP distinguishes success (code 0), failure and explicit cancellation. Interrupted downloads remain partial; a successful process exit does not promise remote atomicity. Finished/failed transfers can be retried in the same pane. Terminal closure without a client result is not reported as success.
+
+Reconnect becomes available after a managed connection ends or fails. It closes the previous owned client, requests authentication again when needed, and replaces the tab while retaining the original connection settings. External/fullscreen sessions also expose Reconnect. Retries are explicit; no automatic credential replay or endless reconnect loop is introduced.
+
+Validation includes generated loopback OpenSSH/SFTP fixtures (files, recursive folders, binary equality, errors, cancellation, server interruption and tab replacement) and a FreeRDP shadow server (NLA, pinned TLS, broker authentication, received desktop pixels, interruption and a fresh connection). Full GUI scenarios also pass under Xvfb at 150% and 200%. These checks do not certify Microsoft Windows Server interoperability, physical mixed-DPI monitors, native Wayland or remote file-clipboard policies. The application still requires X11/XWayland.
+
+For the local session-only checks, pass `--smoke-ui=/tmp/mgremote.png --smoke-sessions`. Live checks are optional and require `MGREMOTE_LIVE_FIXTURE` pointing to a deliberately isolated fixture configuration; ordinary self-tests do not contact any server.

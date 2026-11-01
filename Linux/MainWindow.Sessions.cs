@@ -94,10 +94,27 @@ public sealed partial class MainWindow
     }
     private async void Launch(bool sftp)
     {
+        await OpenConnection(null, sftp);
+    }
+    private readonly HashSet<SessionTab> _reconnecting = [];
+    private async Task ReconnectSession(SessionTab tab)
+    {
+        if (!_tabs.Contains(tab) || tab.Connection == null || !_reconnecting.Add(tab)) return;
+        try {
+            RequireLoadedProfile();
+            tab.Host?.Dispose(); (tab.Body as IDisposable)?.Dispose(); await SessionShutdown(tab);
+            tab.Credentials?.Dispose();
+            if (!_closing && _tabs.Contains(tab)) await OpenConnection(tab.Connection, false, tab, tab.Body is ExternalSession);
+        } catch (Exception ex) { _status.Text = "Reconnexion : " + ex.Message; }
+        finally { _reconnecting.Remove(tab); }
+    }
+    private async Task OpenConnection(Connection? snapshot, bool sftp, SessionTab? replacing = null, bool externalWindow = false)
+    {
         CredentialBroker? credentials = null;
         try {
             RequireLoadedProfile();
-            var model = Read(); Connections.Validate(model);
+            var model = snapshot ?? Read(); Connections.Validate(model);
+            string profilePath = _dataPath;
             if (sftp && model.Protocol != "SSH") throw new ArgumentException("SFTP nécessite SSH.");
             if (sftp) { AddSession(new SessionTab("SFTP · " + model.Name, new FileTransferPane(model, () => UnlockConnection(model)))); return; }
             if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux X11/XWayland.");
@@ -105,20 +122,28 @@ public sealed partial class MainWindow
             credentials = await UnlockConnection(model);
             if (_closing) throw new OperationCanceledException();
             RequireLoadedProfile();
+            if (profilePath != _dataPath || replacing != null && !_tabs.Contains(replacing)) throw new OperationCanceledException();
             var ownedCredentials = credentials;
-            if (model.Protocol == "RDP" && (model.MultiMonitor || model.RdpResolution == "fullscreen")) {
-                var start = SessionLauncher.ExternalStart(model); ownedCredentials?.Configure(start, "RDP");
-                var external = new ExternalSession(start);
-                AddSession(new SessionTab(model.Name + (model.MultiMonitor ? " · Multi-écran" : " · Plein écran"), external, Credentials: ownedCredentials)); credentials = null;
-                _status.Text = "RDP plein écran ouvert en fenêtre native ; fermez son onglet pour arrêter la session."; return;
+            if (externalWindow || model.Protocol == "RDP" && (model.MultiMonitor || model.RdpResolution == "fullscreen")) {
+                var start = SessionLauncher.ExternalStart(model); ownedCredentials?.Configure(start, model.Protocol);
+                SessionTab? externalTab = null;
+                var external = new ExternalSession(start, () => ReconnectSession(externalTab!));
+                external.Completed += _ => ownedCredentials?.Dispose();
+                externalTab = new SessionTab(model.Name + " · Fenêtre externe", external, Credentials: ownedCredentials, Connection: model);
+                InstallConnectedTab(externalTab, replacing); credentials = null;
+                _status.Text = "Fenêtre native liée à son onglet ; reconnexion disponible après la fin du client."; return;
             }
             var status = new TextBlock { Text = "Initialisation…", Margin = new Thickness(8), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
             var native = new EmbeddedSession(parent => { var start = SessionLauncher.Embedded(model, sftp, parent); ownedCredentials?.Configure(start, model.Protocol); return start; }, text => { status.Text = text; _status.Text = text; });
-            var content = SessionWorkspace(model, native, status);
-            AddSession(new SessionTab((sftp ? "SFTP · " : "") + model.Name, content, native, Credentials: ownedCredentials)); credentials = null;
+            native.Completed += _ => ownedCredentials?.Dispose();
+            SessionTab? tab = null;
+            var content = SessionWorkspace(model, native, status, () => ReconnectSession(tab!));
+            tab = new SessionTab(model.Name, content, native, Credentials: ownedCredentials, Connection: model);
+            InstallConnectedTab(tab, replacing); credentials = null;
         } catch (OperationCanceledException) { credentials?.Dispose(); _status.Text = "Connexion annulée."; }
         catch (Exception ex) {
             credentials?.Dispose(); _status.Text = "Connexion : " + ex.Message;
+            if (externalWindow) return;
             var dialog = new Window { Title = "Connexion impossible", Width = 500, Height = 230, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var panel = new StackPanel { Margin = new Thickness(18), Spacing = 16 };
             panel.Children.Add(new TextBlock { Text = ex.Message, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
@@ -126,22 +151,14 @@ public sealed partial class MainWindow
             if (!_closing) await dialog.ShowDialog(this);
         }
     }
-    private async void External()
+    private void InstallConnectedTab(SessionTab tab, SessionTab? replacing)
     {
-        CredentialBroker? credentials = null; ExternalSession? pending = null;
-        try {
-            RequireLoadedProfile();
-            var model = Read(); Connections.Validate(model);
-            credentials = await UnlockConnection(model);
-            if (_closing) throw new OperationCanceledException();
-            RequireLoadedProfile();
-            var start = SessionLauncher.ExternalStart(model); credentials?.Configure(start, model.Protocol);
-            pending = new ExternalSession(start);
-            AddSession(new SessionTab(model.Name + " · Fenêtre externe", pending, Credentials: credentials));
-            credentials = null; pending = null; _status.Text = "Fenêtre externe liée à son onglet ; sa fermeture arrête le client.";
-        } catch (OperationCanceledException) { credentials?.Dispose(); pending?.Dispose(); _status.Text = "Connexion annulée."; }
-        catch (Exception ex) { credentials?.Dispose(); pending?.Dispose(); _status.Text = ex.Message; }
+        AddSession(tab);
+        if (replacing == null) return;
+        int index = _tabs.IndexOf(replacing);
+        if (index >= 0) { _tabs.Move(_tabs.IndexOf(tab), index); CloseSession(replacing); }
     }
+    private async void External() => await OpenConnection(null, false, externalWindow: true);
     private async Task Delete()
     {
         if (!FlushAutoSave()) return;

@@ -21,7 +21,8 @@ public sealed partial class MainWindow
         _exportProfileItem.IsEnabled = _importProfileItem.IsEnabled = _storeLoaded && !_profileBusy;
         if (_profileEditor != null) _profileEditor.IsEnabled = _storeLoaded && !_profileBusy;
         _list.IsEnabled = _storeLoaded && !_profileBusy;
-        _sftp.IsEnabled = _storeLoaded && !_profileBusy && _protocol.SelectedIndex == 0;
+        _connect.IsEnabled = _storeLoaded && !_profileBusy;
+        _sftp.IsEnabled = _connect.IsEnabled && _protocol.SelectedIndex == 0;
     }
     private void RequireLoadedProfile()
     {
@@ -210,9 +211,11 @@ public sealed partial class MainWindow
             await LockProfile(dialog => Click(dialog, "Verrouiller"));
             if (!owned.ShutdownCompletion.IsCompletedSuccessfully) throw new Exception("Profile lock returned before owned process shutdown completed.");
             bool alive; try { using var process = System.Diagnostics.Process.GetProcessById(owned.ProcessId); alive = !process.HasExited; } catch (ArgumentException) { alive = false; }
-            if (alive || _profileKey != null || _storeLoaded || _connections.Count != 0 || _folders.Count != 0 || _tabs.Any(t => t.Closable) || Read().Host.Length > 0 || _profileEditor?.IsEnabled != false) throw new Exception("Profile lock retained client, key or editable connection data.");
+            if (_connect.IsEnabled || _sftp.IsEnabled || alive || _profileKey != null || _storeLoaded || _connections.Count != 0 || _folders.Count != 0 || _tabs.Any(t => t.Closable) || Read().Host.Length > 0 || _profileEditor?.IsEnabled != false) throw new Exception("Profile lock retained client, key or editable connection data.");
             blocked = false; try { Persist([]); } catch (IOException) { blocked = true; }
             if (!blocked || File.ReadAllText(_dataPath) != encrypted) throw new Exception("Manual profile lock modified the saved profile or permitted writes.");
+            _protocol.SelectedIndex = 1; _protocol.SelectedIndex = 0;
+            if (_connect.IsEnabled || _sftp.IsEnabled) throw new Exception("Protocol changes re-enabled actions on a locked profile.");
             int tabs = _tabs.Count; Launch(false); External();
             var failure = OwnedWindows.Single(w => w.Title == "Connexion impossible");
             if (!failure.GetLogicalDescendants().OfType<TextBlock>().Any(t => t.Text?.Contains("Déverrouillez") == true)) throw new Exception("Locked launch did not explain the failure.");

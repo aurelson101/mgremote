@@ -23,6 +23,9 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
     private long _probeUntil;
     private bool _ready;
     private int _processId;
+    private SessionExit? _completion;
+    public int? ExitCode { get; private set; }
+    public event Action<int>? Completed;
     public int ResizeRequests { get; private set; }
     public int TreeQueries { get; private set; }
     public int ChildWindows { get; private set; }
@@ -34,7 +37,7 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
     public EmbeddedSession(Func<uint, ProcessStartInfo> start, Action<string> notify)
     {
         _start = start; _notify = notify; Focusable = true;
-        _resize.Tick += (_, _) => ResizeChildren();
+        _resize.Tick += (_, _) => { if (_completion?.Read() is int code) Complete(code); ResizeChildren(); };
         PointerPressed += (_, _) => FocusNative();
         SizeChanged += (_, _) => ResizeChildren();
         GotFocus += (_, _) => FocusNative();
@@ -53,7 +56,12 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
             _nativeOwned = true;
             xcb_create_window(_connection, 0, _window, (uint)parent.Handle.ToInt64(), 0, 0, 1, 1, 0, 1, 0, 2 | 2048, new uint[] { 0x181a1f, (1u << 17) | (1u << 19) });
             xcb_map_window(_connection, _window); xcb_flush(_connection);
-            _process = new Process { StartInfo = _start(_window), EnableRaisingEvents = true };
+            var start = _start(_window);
+            int font = start.ArgumentList.IndexOf("-fs");
+            if (font >= 0) start.ArgumentList[font + 1] = (11 * (TopLevel.GetTopLevel(this)?.RenderScaling ?? 1)).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            int command = start.ArgumentList.IndexOf("-e");
+            if (command >= 0) { _completion = new SessionExit(); _completion.Wrap(start, command + 1); }
+            _process = new Process { StartInfo = start, EnableRaisingEvents = true };
             _process.Exited += ProcessExited;
             if (!_process.Start()) throw new IOException("Impossible de lancer la session intégrée.");
             _processId = _process.Id; _probeUntil = Stopwatch.GetTimestamp() + 10 * Stopwatch.Frequency;
@@ -68,9 +76,16 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
         if (!_disposed) {
             _resize.Stop();
             if (!_ready) Fail("Le client s’est arrêté avant l’affichage de la session (code " + _process!.ExitCode + "). Vérifiez ses dépendances Linux ou essayez une fenêtre externe.");
-            else _notify("Session terminée. Fermez l’onglet ou reconnectez-vous ; vérifiez les messages du terminal si la connexion a échoué.");
+            Complete(_completion == null ? _process!.ExitCode : _completion.Read() ?? 125);
         }
     });
+    private void Complete(int code)
+    {
+        if (ExitCode != null || _disposed) return;
+        ExitCode = code; if (_ready) _resize.Stop();
+        _notify(code == 0 ? "Session terminée (code 0)." : "Connexion interrompue ou refusée (code " + code + "). Vérifiez le journal puis reconnectez-vous.");
+        Completed?.Invoke(code);
+    }
     private void Fail(string message)
     {
         if (StartupFailed) return;
@@ -121,7 +136,8 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
         var children = Children(); ChildWindows = children.Length;
         if (!_ready && ChildWindows > 0) {
             _ready = true; _resize.Interval = TimeSpan.FromMilliseconds(500);
-            _notify("Client intégré prêt. Ctrl+Maj+C/V : copier/coller dans le terminal.");
+            if (ExitCode == null) _notify("Client intégré prêt.");
+            else _resize.Stop();
         }
         foreach (uint child in children) {
             if (_configured.TryGetValue(child, out var size) && size == (width, height)) continue;
@@ -151,8 +167,9 @@ public sealed class EmbeddedSession : NativeControlHost, IDisposable
         if (process != null) {
             process.Exited -= ProcessExited;
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            ShutdownCompletion = Task.Run(async () => { try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch (InvalidOperationException) when (_processId == 0) { } finally { process.Dispose(); } });
+            ShutdownCompletion = Task.Run(async () => { try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch (InvalidOperationException) when (_processId == 0) { } finally { process.Dispose(); _completion?.Dispose(); } });
         }
+        if (process == null) _completion?.Dispose();
         if (_connection != IntPtr.Zero) { if (_window != 0) xcb_destroy_window(_connection, _window); xcb_flush(_connection); xcb_disconnect(_connection); _connection = IntPtr.Zero; _window = 0; }
     }
     [DllImport("libxcb.so.1")] private static extern IntPtr xcb_connect(IntPtr display, out int screen);

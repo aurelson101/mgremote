@@ -28,7 +28,7 @@ public sealed partial class MainWindow
         if (login.Length > 0) header.Children.Add(new TextBlock { Text = login, FontSize = 11, Foreground = Brush.Parse("#64748b"), VerticalAlignment = VerticalAlignment.Center });
         return header;
     }
-    private const string HelpText = "MGRemote — Guide Linux 0.2.17\n\nConnexions\nClic droit : nouveau dossier, nouvelle connexion, modifier/renommer, dupliquer. F2 modifie ; Inser crée une connexion. Sélectionnez une connexion pour choisir SSH, RDP ou Série, l’hôte, le port et l’utilisateur dans Configuration. Les modifications valides sont enregistrées automatiquement ; Enregistrer force une sauvegarde immédiate.\n\nProfil et icônes\nLe menu Fichier permet de chiffrer le profil complet. La proposition au démarrage est facultative ; Plus tard conserve le fonctionnement sans chiffrement. Un profil chiffré exige sa phrase secrète à chaque ouverture. Fichier → Verrouiller le profil ferme les sessions gérées et efface la clé active après confirmation. Dans Général, Auto choisit l’icône depuis les métadonnées et le protocole ; un choix manuel reste possible.\n\nDéplacer le profil vers un autre PC Linux\nFichier → Exporter le profil chiffré : choisissez un fichier .mgremote et confirmez une phrase secrète. Sur l’autre PC, Fichier → Importer un profil chiffré. L’import ajoute les connexions sans supprimer le profil local et peut le chiffrer avec cette phrase. Les clés privées SSH et ~/.ssh/config restent à transférer séparément ; les secrets de connexion gardent leur phrase locale d’origine.\n\nClés et tunnels SSH\nLa clé SSH est facultative. Utilisez Sans clé pour un mot de passe, un agent ou la configuration OpenSSH. Si nécessaire, choisissez une clé privée OpenSSH/PEM, un certificat public facultatif et un alias de bastion. Un tunnel local écoute sur 127.0.0.1 pendant la session ; indiquez son port local et la destination vue du serveur SSH. SFTP n’ouvre pas de second tunnel.\n\nSSH — texte dans les deux sens\nSélectionnez le texte avec le bouton gauche pour le copier ; un clic droit colle le presse-papiers local dans le terminal, sans ajouter Entrée. Ctrl+Maj+C/V restent disponibles. Ctrl+C interrompt la commande. Dans une application qui capture la souris, maintenez Maj pour sélectionner. Pour les fichiers/dossiers, ouvrez SFTP depuis la session : collez ou déposez les éléments locaux, vérifiez le dossier distant (terminé par / pour plusieurs éléments), confirmez les remplacements puis démarrez. Le téléchargement prend aussi en charge les dossiers récursifs, vers un nouveau dossier local. Le clic droit dans les champs du panneau permet aussi de copier/coller texte, fichiers et dossiers. Copier le dossier reçu permet de le coller dans le gestionnaire de fichiers local. Aucun collage ne lance automatiquement un transfert.\n\nRDP — presse-papiers et fichiers\nActivez Presse-papiers RDP avant de connecter/reconnecter. Utilisez Ctrl+C / Ctrl+V dans le bureau distant. Le mode fichiers bidirectionnel nécessite FreeRDP 3 ; activez-le avant de reconnecter. Pour les dossiers, utilisez le partage local et les boutons du bandeau de session pour copier son chemin Windows ou ouvrir son dossier local. Les stratégies du serveur peuvent bloquer la redirection. Le partage explicite d’un dossier donne accès en lecture/écriture via \\\\tsclient\\MGRemote ; aucun lecteur n’est partagé automatiquement.\n\nMulti-écran RDP\nCochez Plusieurs écrans puis Connecter. FreeRDP ouvre une fenêtre native en plein écran sur plusieurs moniteurs ; son onglet MGRemote permet de fermer le processus. Ctrl+Alt+Entrée bascule le plein écran si le client le permet. Les écrans physiques, DPI mixtes et branchements à chaud nécessitent un essai réel.\n\nSecrets importés\nDéverrouillez avec la phrase locale ou choisissez Connexion manuelle. Le premier accès SSH, les bastions, phrases de clés et MFA peuvent nécessiter le mode manuel. Vérifiez les empreintes et certificats.\n\nCette édition reste une préversion avec une parité Windows incomplète. Les tests locaux de presse-papiers ne prouvent pas la redirection d’un serveur RDP/SSH réel.";
+    private const string HelpText = "MGRemote — Guide Linux 0.2.18\n\nConnexions\nClic droit : nouveau dossier, nouvelle connexion, modifier/renommer, dupliquer. F2 modifie ; Inser crée une connexion. Sélectionnez une connexion pour choisir SSH, RDP ou Série, l’hôte, le port et l’utilisateur dans Configuration. Les modifications valides sont enregistrées automatiquement ; Enregistrer force une sauvegarde immédiate.\n\nProfil et icônes\nLe menu Fichier permet de chiffrer le profil complet. La proposition au démarrage est facultative ; Plus tard conserve le fonctionnement sans chiffrement. Un profil chiffré exige sa phrase secrète à chaque ouverture. Fichier → Verrouiller le profil ferme les sessions gérées et efface la clé active après confirmation. Dans Général, Auto choisit l’icône depuis les métadonnées et le protocole ; un choix manuel reste possible.\n\nDéplacer le profil vers un autre PC Linux\nFichier → Exporter le profil chiffré : choisissez un fichier .mgremote et confirmez une phrase secrète. Sur l’autre PC, Fichier → Importer un profil chiffré. L’import ajoute les connexions sans supprimer le profil local et peut le chiffrer avec cette phrase. Les clés privées SSH et ~/.ssh/config restent à transférer séparément ; les secrets de connexion gardent leur phrase locale d’origine.\n\nClés et tunnels SSH\nLa clé SSH est facultative. Utilisez Sans clé pour un mot de passe, un agent ou la configuration OpenSSH. Si nécessaire, choisissez une clé privée OpenSSH/PEM, un certificat public facultatif et un alias de bastion. Un tunnel local écoute sur 127.0.0.1 pendant la session ; indiquez son port local et la destination vue du serveur SSH. SFTP n’ouvre pas de second tunnel.\n\nSessions et reconnexion\nAprès une fin ou une coupure, Reconnecter ferme le client précédent et reprend les réglages de la session. L’authentification est redemandée si nécessaire ; aucune boucle de reconnexion automatique. Le résultat SFTP vient du code de sortie réel : succès, échec ou annulation. Un téléchargement interrompu peut être partiel.\n\nSSH — texte dans les deux sens\nSélectionnez le texte avec le bouton gauche pour le copier ; un clic droit colle le presse-papiers local dans le terminal, sans ajouter Entrée. Ctrl+Maj+C/V restent disponibles. Ctrl+C interrompt la commande. Dans une application qui capture la souris, maintenez Maj pour sélectionner. Pour les fichiers/dossiers, ouvrez SFTP depuis la session : collez ou déposez les éléments locaux, vérifiez le dossier distant (terminé par / pour plusieurs éléments), confirmez les remplacements puis démarrez. Le téléchargement prend aussi en charge les dossiers récursifs, vers un nouveau dossier local. Le clic droit dans les champs du panneau permet aussi de copier/coller texte, fichiers et dossiers. Copier le dossier reçu permet de le coller dans le gestionnaire de fichiers local. Aucun collage ne lance automatiquement un transfert.\n\nRDP — presse-papiers et fichiers\nActivez Presse-papiers RDP avant de connecter/reconnecter. Utilisez Ctrl+C / Ctrl+V dans le bureau distant. Le mode fichiers bidirectionnel nécessite FreeRDP 3 ; activez-le avant de reconnecter. Pour les dossiers, utilisez le partage local et les boutons du bandeau de session pour copier son chemin Windows ou ouvrir son dossier local. Les stratégies du serveur peuvent bloquer la redirection. Le partage explicite d’un dossier donne accès en lecture/écriture via \\\\tsclient\\MGRemote ; aucun lecteur n’est partagé automatiquement.\n\nMulti-écran RDP\nCochez Plusieurs écrans puis Connecter. FreeRDP ouvre une fenêtre native en plein écran sur plusieurs moniteurs ; son onglet MGRemote permet de fermer le processus. Ctrl+Alt+Entrée bascule le plein écran si le client le permet. Les écrans physiques, DPI mixtes et branchements à chaud nécessitent un essai réel.\n\nSecrets importés\nDéverrouillez avec la phrase locale ou choisissez Connexion manuelle. Le premier accès SSH, les bastions, phrases de clés et MFA peuvent nécessiter le mode manuel. Vérifiez les empreintes et certificats.\n\nCette édition reste une préversion avec une parité Windows incomplète. Les tests locaux de presse-papiers ne prouvent pas la redirection d’un serveur RDP/SSH réel.";
     private void ShowHelp()
     {
         var existing = _tabs.FirstOrDefault(t => t.Name == "Aide");
@@ -118,25 +118,54 @@ internal sealed class ExternalSession : StackPanel, IDisposable
 {
     private readonly Process _process;
     private bool _disposed;
+    private readonly SessionExit? _completion;
+    private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    internal int? ExitCode { get; private set; }
+    internal event Action<int>? Completed;
     internal int ProcessId { get; }
     internal Task ShutdownCompletion { get; private set; } = Task.CompletedTask;
-    internal ExternalSession(ProcessStartInfo start)
+    internal ExternalSession(ProcessStartInfo start, Func<Task>? reconnect = null)
     {
         Margin = new Thickness(24); Spacing = 12;
         Children.Add(new TextBlock { Text = "Session dans une fenêtre native", FontSize = 16 });
         Children.Add(new TextBlock { Text = "La fenêtre du client est liée à cet onglet. Fermer l’onglet arrête aussi le client et son terminal.", TextWrapping = TextWrapping.Wrap });
         var stop = new Button { Content = "Fermer la session externe" }; stop.Click += (_, _) => { Dispose(); stop.IsEnabled = false; }; Children.Add(stop);
-        _process = Process.Start(start) ?? throw new IOException("Impossible de démarrer le client externe."); ProcessId = _process.Id;
+        int command = start.ArgumentList.IndexOf("-e");
+        if (command >= 0) { _completion = new SessionExit(); _completion.Wrap(start, command + 1); }
+        try { _process = Process.Start(start) ?? throw new IOException("Impossible de démarrer le client externe."); }
+        catch { _completion?.Dispose(); throw; }
+        ProcessId = _process.Id;
+        var state = new TextBlock { Text = "Client en cours d’exécution.", TextWrapping = TextWrapping.Wrap }; Children.Add(state);
+        Button? retry = null;
+        if (reconnect != null) {
+            retry = new Button { Content = "Reconnecter", IsEnabled = false };
+            retry.Click += async (_, _) => {
+                retry.IsEnabled = false;
+                try { await reconnect(); } catch (Exception ex) { state.Text = ex.Message; }
+                finally { if (!_disposed) retry.IsEnabled = true; }
+            };
+            Children.Add(retry);
+        }
+        _poll.Tick += (_, _) => {
+            if (_disposed) return;
+            int? code = _completion?.Read() ?? (_process.HasExited ? (_completion == null ? _process.ExitCode : 125) : null);
+            if (code == null) return;
+            _poll.Stop(); ExitCode = code;
+            state.Text = code == 0 ? "Session terminée (code 0)." : "Client arrêté ou connexion interrompue (code " + code + ").";
+            if (retry != null) retry.IsEnabled = true;
+            Completed?.Invoke(code.Value);
+        };
+        _poll.Start();
     }
     public void Dispose()
     {
-        if (_disposed) return; _disposed = true;
+        if (_disposed) return; _disposed = true; _poll.Stop();
         try { if (!_process.HasExited) _process.Kill(true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
         ShutdownCompletion = Finish();
     }
     private async Task Finish()
     {
         try { await _process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
-        finally { _process.Dispose(); }
+        finally { _process.Dispose(); _completion?.Dispose(); }
     }
 }

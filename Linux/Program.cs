@@ -16,6 +16,7 @@ internal static class Program
     {
         if (args.Length > 0 && args[0] is "--credential-askpass" or "--credential-rdp") { Environment.ExitCode = CredentialBroker.RunHelper(args).GetAwaiter().GetResult(); return; }
         if (args.Contains("--credential-stdin-fixture")) { Environment.ExitCode = Console.ReadLine() == "fixture-password" && Environment.GetEnvironmentVariable("MGREMOTE_CREDENTIAL_TOKEN") == null ? 0 : 2; return; }
+        if (args.Length > 0 && args[0] == "--session-runner") { Environment.ExitCode = SessionExit.Run(args); return; }
         if (args.Contains("--self-test")) { SelfTest.Run(); return; }
         if (args.Contains("--terminal-fixture")) {
             string? report = args.FirstOrDefault(a => a.StartsWith("--fixture-output="));
@@ -43,23 +44,26 @@ public sealed class App : Application
             if (Smoke) Avalonia.Threading.DispatcherTimer.RunOnce(async () => {
                 try {
                     var window = desktop.MainWindow;
-                    ((MainWindow)window).VerifyProtocolPortEditing();
-                    ((MainWindow)window).VerifyTreeActions();
-                    await ((MainWindow)window).VerifyTreeState();
-                    await ((MainWindow)window).VerifyProfileUi();
-                    await ((MainWindow)window).VerifyPortableProfileUi();
-                    await ((MainWindow)window).VerifyKeySelection();
-                    await ((MainWindow)window).VerifyProfileWorkflowUi();
-                    await ((MainWindow)window).VerifySessionTransferTools();
-                    ((MainWindow)window).VerifyTabClosing();
-                    await ((MainWindow)window).VerifyDesktopUi();
-                    await ((MainWindow)window).VerifyEmbeddedSessions();
+                    if (!Environment.GetCommandLineArgs().Contains("--smoke-sessions")) {
+                        ((MainWindow)window).VerifyProtocolPortEditing();
+                        ((MainWindow)window).VerifyTreeActions();
+                        await ((MainWindow)window).VerifyTreeState();
+                        await ((MainWindow)window).VerifyProfileUi();
+                        await ((MainWindow)window).VerifyPortableProfileUi();
+                        await ((MainWindow)window).VerifyKeySelection();
+                        await ((MainWindow)window).VerifyProfileWorkflowUi();
+                        await ((MainWindow)window).VerifySessionTransferTools();
+                        ((MainWindow)window).VerifyTabClosing();
+                        await ((MainWindow)window).VerifyDesktopUi();
+                        await ((MainWindow)window).VerifyEmbeddedSessions();
+                    }
+                    await ((MainWindow)window).VerifySessionStability();
                     ((MainWindow)window).PrepareSmokePreview();
                     await Task.Delay(150);
                     if (window.Bounds.Width < 760 || window.Bounds.Height < 500) throw new Exception("Window layout failed.");
-                    using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)window.Bounds.Width, (int)window.Bounds.Height));
+                    using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)(window.Bounds.Width * window.RenderScaling), (int)(window.Bounds.Height * window.RenderScaling)), new Vector(96 * window.RenderScaling, 96 * window.RenderScaling));
                     image.Render((Visual)window.Content!);
-                    image.Save(Environment.GetCommandLineArgs().Single(a => a.StartsWith("--smoke-ui="))[11..]);
+                    image.Save(Environment.GetCommandLineArgs().Single(a => a.StartsWith("--smoke-ui="))[11..], new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
                     await ((MainWindow)window).VerifyCompactLayout(Environment.GetCommandLineArgs().Single(a => a.StartsWith("--smoke-ui="))[11..].Replace(".png", "-compact.png"));
                     Console.WriteLine("PASS: Linux prototype GUI rendered; user configuration untouched."); desktop.Shutdown();
                 } catch (Exception ex) { Console.Error.WriteLine(ex); desktop.Shutdown(1); }
@@ -85,7 +89,7 @@ public sealed partial class MainWindow : Window
     private readonly Grid _sessionArea = new();
     private readonly Dictionary<Connection, TreeViewItem> _nodes = new(ReferenceEqualityComparer.Instance);
     private string[] _selectedFolder = [];
-    private sealed record SessionTab(string Name, Control Body, EmbeddedSession? Host = null, bool Closable = true, CredentialBroker? Credentials = null);
+    private sealed record SessionTab(string Name, Control Body, EmbeddedSession? Host = null, bool Closable = true, CredentialBroker? Credentials = null, Connection? Connection = null);
     private readonly TextBox _name = new(), _host = new(), _user = new(), _domain = new(), _key = new();
     private readonly TextBox _jump = new() { PlaceholderText = "Alias Host dans ~/.ssh/config" }, _sharePath = new();
     private readonly CheckBox _share = new() { Content = "Partager ce dossier RDP en lecture/écriture" };
@@ -95,17 +99,17 @@ public sealed partial class MainWindow : Window
     private readonly NumericUpDown _baud = new() { Minimum = 50, Maximum = 4000000, Value = 9600 }, _bits = new() { Minimum = 5, Maximum = 8, Value = 8 }, _stop = new() { Minimum = 1, Maximum = 2, Value = 1 };
     private readonly ComboBox _parity = new() { ItemsSource = new[] { "none", "even", "odd" }, SelectedIndex = 0 }, _flow = new() { ItemsSource = new[] { "none", "hardware", "software" }, SelectedIndex = 0 };
     private readonly StackPanel _serialFields = new() { Spacing = 0, IsVisible = false };
-    private readonly TextBox _search = new() { Watermark = "Rechercher une connexion…" };
-    private readonly Button _sftp;
+    private readonly TextBox _search = new() { PlaceholderText = "Rechercher une connexion…" };
+    private readonly Button _sftp, _connect;
     private readonly CheckBox _clipboard = new() { Content = "Presse-papiers RDP bidirectionnel" };
     private readonly CheckBox _multi = new() { Content = "RDP sur plusieurs écrans" };
-    private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _status = new() { TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
     private Connection? _editing;
     private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
         _defaultProfilePath = _dataPath;
-        Title = "MGRemote — Linux Desktop 0.2.17"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.18"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 13;
         Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
@@ -121,20 +125,20 @@ public sealed partial class MainWindow : Window
         root.Children.Add(menus);
         _lockProfileItem.Click += async (_, _) => await LockProfile();
         _exportProfileItem.Click += async (_, _) => await ExportPortableProfile(); _importProfileItem.Click += async (_, _) => await ImportPortableProfile();
-        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(5, 3) }; toolbar.Classes.Add("toolstrip");
+        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Margin = new Thickness(8, 6) }; toolbar.Classes.Add("toolstrip");
         toolbar.Children.Add(ToolButton("Connexion", "Nouvelle connexion · Ctrl+N", "M2 2H13V18H2Z M6 7H17 M11 2V12", NewConnectionFromTree));
         toolbar.Children.Add(ToolButton("Dossier", "Nouveau dossier", "M2 5H8L10 7H20V18H2Z", async () => await CreateFolderDialog()));
         toolbar.Children.Add(new Border { Width = 1, Height = 18, Background = PanelLine, Margin = new Thickness(5, 0) });
-        toolbar.Children.Add(ToolButton("Connecter", "Ouvrir la connexion sélectionnée", "M6 3L17 10L6 17Z", () => Launch(false)));
+        _connect = ToolButton("Connecter", "Ouvrir la connexion sélectionnée", "M6 3L17 10L6 17Z", () => Launch(false)); _connect.Classes.Add("primary-action"); toolbar.Children.Add(_connect);
         _sftp = ToolButton("SFTP", "Transfert de fichiers", "M3 5H19 M15 1L19 5L15 9 M19 15H3 M7 11L3 15L7 19", () => Launch(true)); toolbar.Children.Add(_sftp);
         toolbar.Children.Add(ToolButton("Importer", "Importer des connexions mRemoteNG", "M10 2V13 M5 8L10 13L15 8 M2 14V19H18V14", async () => await Import()));
         Grid.SetRow(toolbar, 1); root.Children.Add(toolbar);
-        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("320,4,*") }; Grid.SetRow(body, 2);
-        body.ColumnDefinitions[0].MinWidth = 280; body.ColumnDefinitions[2].MinWidth = 420;
+        var body = new Grid { ColumnDefinitions = new ColumnDefinitions("360,4,*") }; Grid.SetRow(body, 2);
+        body.ColumnDefinitions[0].MinWidth = 320; body.ColumnDefinitions[2].MinWidth = 420;
         var sidebar = new Grid { RowDefinitions = new RowDefinitions("2*,4,3*") };
         var treePanel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Background = Brushes.White };
         treePanel.Children.Add(DockTitle("Connexions"));
-        _search.Margin = new Thickness(5); _search.MinHeight = 26; _search.FontSize = 12; Grid.SetRow(_search, 1); treePanel.Children.Add(_search);
+        _search.Margin = new Thickness(8); _search.MinHeight = 30; _search.FontSize = 13; Grid.SetRow(_search, 1); treePanel.Children.Add(_search);
         Grid.SetRow(_list, 2); treePanel.Children.Add(_list); sidebar.Children.Add(treePanel);
         _list.SelectionChanged += (_, _) => {
             if (_rebuildingTree) return;
@@ -195,26 +199,30 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(editActions, 3); editor.Children.Add(editActions); Grid.SetRow(editor, 2); sidebar.Children.Add(editor);
         body.Children.Add(sidebar);
         var vertical = new GridSplitter { Width = 4, Background = PanelLine, VerticalAlignment = VerticalAlignment.Stretch }; Grid.SetColumn(vertical, 1); body.Children.Add(vertical);
-        var sessions = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Background = Brush.Parse("#f3f5f7") };
+        var sessions = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Background = Brush.Parse("#f7f8fa") };
         _tabBar.ItemsSource = _tabs;
         _tabBar.ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<SessionTab>((tab, _) => {
             var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            header.Children.Add(new TextBlock { Text = tab!.Name, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
-            if (tab.Closable) { var close = new Button { Content = "×", Padding = new Thickness(5, 0) }; close.Click += (_, _) => CloseSession(tab); header.Children.Add(close); }
+            header.Children.Add(new TextBlock { Text = tab!.Name, FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
+            if (tab.Closable) { var close = new Button { Content = "×", Padding = new Thickness(5, 0) }; ToolTip.SetTip(close, "Fermer « " + tab.Name + " »"); Avalonia.Automation.AutomationProperties.SetName(close, "Fermer « " + tab.Name + " »"); close.Click += (_, e) => { e.Handled = true; CloseSession(tab); }; header.Children.Add(close); }
             return header;
         });
         _tabBar.SelectionChanged += (_, _) => { foreach (var tab in _tabs) tab.Body.IsVisible = ReferenceEquals(tab, _tabBar.SelectedItem); };
         sessions.Children.Add(new Border { Background = DesktopAppearance.Chrome, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 0, 1), Child = _tabBar }); Grid.SetRow(_sessionArea, 1); sessions.Children.Add(_sessionArea);
         Grid.SetColumn(sessions, 2); body.Children.Add(sessions); root.Children.Add(body);
-        AddSession(new SessionTab("Général", EmptyWorkspace(), null, false));
-        Grid.SetRow(_status, 3); _status.Margin = new Thickness(8, 4); _status.FontSize = 11; root.Children.Add(_status); Content = root;
+        AddSession(new SessionTab("Accueil", EmptyWorkspace(), null, false));
+        var statusTip = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 560 };
+        statusTip.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(TextBlock.Text)) { Source = _status }); ToolTip.SetTip(_status, statusTip);
+        _status.Margin = new Thickness(10, 0); _status.FontSize = 12;
+        var statusBar = new Border { Height = 32, Background = DesktopAppearance.Chrome, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 1, 0, 0), Child = _status };
+        Grid.SetRow(statusBar, 3); root.Children.Add(statusBar); Content = root;
         Closed += (_, _) => { _closing = true; ForgetTreeState(); _profileKey?.Dispose(); foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } CleanupSmokeStore(); };
         _protocol.SelectionChanged += (_, _) => {
             UpdateProtocol();
         };
         if (App.Smoke) _status.Text = "Prêt — validation locale.";
         else { _storeLoaded = false; Opened += async (_, _) => await InitializeProfile(); }
-        foreach (var input in new[] { _description, _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = Brushes.White; input.Foreground = Foreground; input.FontSize = 12; }
+        foreach (var input in new[] { _description, _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = Brushes.White; input.Foreground = Foreground; input.FontSize = 13; }
         _list.Background = Brushes.White; _list.Foreground = Foreground; Filter();
         InstallShortcuts(); New(); UpdateProfileActions(); InstallAutoSave();
     }
@@ -225,8 +233,9 @@ public sealed partial class MainWindow : Window
     }
     private static void Add(Panel panel, string label, Control control)
     {
-        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("110,*"), MinHeight = 26 };
-        row.Children.Add(new Border { Background = Brush.Parse("#f5f6f8"), BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 1, 0), Padding = new Thickness(8, 3), Child = new TextBlock { Text = label, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center } });
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("128,*"), MinHeight = 30 };
+        row.Children.Add(new Border { Background = Brush.Parse("#f5f6f8"), BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 1, 0), Padding = new Thickness(8, 3), Child = new TextBlock { Text = label, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center } });
+        ToolTip.SetTip(row.Children[0], label);
         control.HorizontalAlignment = HorizontalAlignment.Stretch; control.VerticalAlignment = VerticalAlignment.Stretch; Grid.SetColumn(control, 1); row.Children.Add(control);
         panel.Children.Add(new Border { BorderBrush = Brush.Parse("#e7eaee"), BorderThickness = new Thickness(0, 0, 0, 1), Child = row });
     }
@@ -240,10 +249,10 @@ public sealed partial class MainWindow : Window
     private void UpdateProtocol()
     {
         bool ssh = _protocol.SelectedIndex == 0, rdp = _protocol.SelectedIndex == 1, serial = _protocol.SelectedIndex == 2;
-        _key.IsEnabled = _jump.IsEnabled = ssh; _domain.IsEnabled = rdp; _clipboard.IsVisible = _multi.IsVisible = rdp; _rdpFields.IsVisible = rdp; _sftp.IsEnabled = ssh;
+        _key.IsEnabled = _jump.IsEnabled = ssh; _domain.IsEnabled = rdp; _clipboard.IsVisible = _multi.IsVisible = rdp; _rdpFields.IsVisible = rdp; _connect.IsEnabled = _storeLoaded && !_profileBusy; _sftp.IsEnabled = ssh && _connect.IsEnabled;
         UpdateAdvancedProperties();
         _serialFields.IsVisible = serial; _port.IsEnabled = _user.IsEnabled = !serial;
-        _host.Watermark = serial ? "/dev/ttyUSB0 ou /dev/serial/by-id/…" : "Serveur, adresse IP ou alias SSH";
+        _host.PlaceholderText = serial ? "/dev/ttyUSB0 ou /dev/serial/by-id/…" : "Serveur, adresse IP ou alias SSH";
         if (!serial && _port.Value is 22 or 3389) _port.Value = ssh ? 22 : 3389;
     }
     private void Filter() => RebuildTree();

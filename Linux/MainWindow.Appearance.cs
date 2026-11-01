@@ -15,7 +15,7 @@ public sealed partial class MainWindow
     private static Control DockTitle(string title)
         => new Border {
             Background = Brush.Parse("#edf0f3"), BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 0, 1),
-            Child = new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeight.SemiBold, Margin = new Thickness(8, 4) }
+            Child = new TextBlock { Text = title, FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 7) }
         };
     private static Image ToolbarGlyph(string path, int size = 16)
         => new() { Width = size, Height = size, Source = new DrawingImage { Drawing = new GeometryDrawing {
@@ -26,7 +26,7 @@ public sealed partial class MainWindow
         var button = Button(label, action);
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
         content.Children.Add(ToolbarGlyph(path));
-        content.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 });
+        content.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, FontSize = 13 });
         button.Content = content; ToolTip.SetTip(button, tooltip); button.Classes.Add("tool-button");
         return button;
     }
@@ -42,7 +42,7 @@ public sealed partial class MainWindow
         group.Margin = new Thickness(0); group.Padding = new Thickness(0); group.BorderThickness = new Thickness(0);
         group.Template = new FuncControlTemplate<Expander>((owner, _) => {
             var heading = new ToggleButton {
-                Height = 25, MinHeight = 25, Padding = new Thickness(6, 0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0),
+                Height = 30, MinHeight = 30, Padding = new Thickness(6, 0), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0),
                 Background = Brush.Parse("#e9edf1"), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch
             };
             heading.Classes.Add("category-header");
@@ -52,7 +52,7 @@ public sealed partial class MainWindow
                 RenderTransform = new RotateTransform(owner.IsExpanded ? 0 : -90)
             };
             var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            title.Children.Add(arrow); title.Children.Add(new TextBlock { Text = owner.Header?.ToString(), FontWeight = FontWeight.SemiBold, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+            title.Children.Add(arrow); title.Children.Add(new TextBlock { Text = owner.Header?.ToString(), FontWeight = FontWeight.SemiBold, FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
             heading.Content = title;
             heading.Bind(ToggleButton.IsCheckedProperty, new Binding(nameof(Expander.IsExpanded)) { Source = owner, Mode = BindingMode.TwoWay });
             heading.IsCheckedChanged += (_, _) => arrow.RenderTransform = new RotateTransform(heading.IsChecked == true ? 0 : -90);
@@ -62,18 +62,28 @@ public sealed partial class MainWindow
             var panel = new StackPanel(); panel.Children.Add(heading); panel.Children.Add(body); return panel;
         });
     }
-    private static Control EmptyWorkspace()
+    private Control EmptyWorkspace()
     {
-        var panel = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 420, Margin = new Thickness(24) };
-        var icon = ToolbarGlyph("M2 2H22V16H2Z M8 22H16 M12 16V22", 36); icon.Opacity = 0.45; icon.HorizontalAlignment = HorizontalAlignment.Center;
+        var panel = new StackPanel { Spacing = 14, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 430, Margin = new Thickness(28) };
+        var icon = ToolbarGlyph("M2 2H22V16H2Z M8 22H16 M12 16V22", 40); icon.HorizontalAlignment = HorizontalAlignment.Center;
         panel.Children.Add(icon);
-        panel.Children.Add(new TextBlock { Text = "Aucune session ouverte", FontSize = 15, Foreground = Brush.Parse("#64707d"), HorizontalAlignment = HorizontalAlignment.Center });
-        panel.Children.Add(new TextBlock { Text = "Double-cliquez sur une connexion pour ouvrir un onglet.", FontSize = 12, Foreground = Brush.Parse("#808b97"), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center });
+        panel.Children.Add(new TextBlock { Text = "Votre espace de connexions", FontSize = 20, FontWeight = FontWeight.SemiBold, Foreground = DesktopAppearance.Text, HorizontalAlignment = HorizontalAlignment.Center });
+        panel.Children.Add(new TextBlock { Text = "Sélectionnez une connexion à gauche, puis cliquez sur Connecter. Le double-clic ouvre aussi une session.", FontSize = 13, Foreground = DesktopAppearance.MutedText, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center });
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        var create = Button("Nouvelle connexion", NewConnectionFromTree); create.Margin = new Thickness(4); actions.Children.Add(create);
+        var import = Button("Importer des connexions…", async () => await Import()); import.Margin = new Thickness(4); actions.Children.Add(import);
+        panel.Children.Add(actions);
         return panel;
     }
     internal async Task VerifyCompactLayout(string screenshot)
     {
         Width = 900; Height = 600; await Task.Delay(180);
+        if (double.TryParse(Environment.GetEnvironmentVariable("AVALONIA_GLOBAL_SCALE_FACTOR"), System.Globalization.CultureInfo.InvariantCulture, out double expectedScale) && Math.Abs(RenderScaling - expectedScale) > 0.01) throw new Exception("Requested HiDPI scale was not applied.");
+        string previousStatus = _status.Text ?? "";
+        _status.Text = string.Join(" ", Enumerable.Repeat("Un message long ne doit pas déplacer les actions de configuration.", 40));
+        await Task.Delay(80);
+        if (_status.Bounds.Height > 32 || _status.Bounds.Width > ClientSize.Width || ToolTip.GetTip(_status) is not TextBlock tip || tip.Text != _status.Text) throw new Exception("Long status messages resize the workspace or lose their full text.");
+        _status.Text = previousStatus;
         var actions = ((Control)Content!).GetVisualDescendants().OfType<Button>()
             .Where(b => b.Content is string label && label is "Enregistrer" or "Supprimer").ToArray();
         if (actions.Length != 2) throw new Exception("Configuration actions are missing.");
@@ -81,8 +91,8 @@ public sealed partial class MainWindow
             var point = action.TranslatePoint(new Point(), this);
             if (point == null || point.Value.Y < 0 || point.Value.Y + action.Bounds.Height > ClientSize.Height) throw new Exception("Compact layout hides configuration actions.");
         }
-        using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)ClientSize.Width, (int)ClientSize.Height));
-        image.Render((Visual)Content!); image.Save(screenshot);
-        Console.WriteLine("PASS: compact 900x600 desktop layout, visible configuration actions and screenshot.");
+        using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)(ClientSize.Width * RenderScaling), (int)(ClientSize.Height * RenderScaling)), new Vector(96 * RenderScaling, 96 * RenderScaling));
+        image.Render((Visual)Content!); image.Save(screenshot, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+        Console.WriteLine("PASS: compact 900x600 desktop layout, visible configuration actions, stable long-status layout, DPI scale=" + RenderScaling + " and screenshot.");
     }
 }

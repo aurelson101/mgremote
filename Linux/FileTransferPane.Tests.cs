@@ -59,6 +59,19 @@ public sealed partial class FileTransferPane
             if (copiedFile?.Single().TryGetLocalPath() != filePath) throw new Exception("Mouse context menu did not export local files to the system clipboard.");
             string externalUris = await MainWindow.RunDesktopTool("xclip", "-o", "-selection", "clipboard", "-t", "text/uri-list");
             if (!externalUris.Contains(file.Path.AbsoluteUri, StringComparison.Ordinal)) throw new Exception("External file manager clipboard format was not published.");
+            var window = (Window)top; double width = window.Width, height = window.Height;
+            try {
+                window.Width = 900; window.Height = 600; await Task.Delay(180);
+                var form = ((Grid)Content!).Children.OfType<ScrollViewer>().Single();
+                if (form.Extent.Width > form.Viewport.Width + 1 || form.Bounds.Height > Bounds.Height * 0.42 + 1 || _progress.Bounds.Height < 120) throw new Exception($"Compact SFTP layout: pane={Bounds.Size}, form={form.Bounds.Size}, extent={form.Extent}, viewport={form.Viewport}, terminal={_progress.Bounds.Size}.");
+                foreach (var button in ((Grid)Content!).Children.OfType<WrapPanel>().Single().Children.OfType<Button>()) {
+                    var point = button.TranslatePoint(new Point(), this);
+                    if (point == null || point.Value.Y < 0 || point.Value.Y + button.Bounds.Height > Bounds.Height || button.Bounds.Width <= 0) throw new Exception("Compact SFTP layout hides transfer actions.");
+                }
+                using var compact = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)Bounds.Width, (int)Bounds.Height));
+                compact.Render(this); compact.Save(screenshot.Replace(".png", "-compact.png"), new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+            } finally { window.Width = width; window.Height = height; }
+            Console.WriteLine("PASS: SFTP compact layout wraps the form, keeps transfer actions visible, preserves vertical scrolling and leaves room for the terminal.");
             await Clipboard().ClearAsync();
             Console.WriteLine("PASS: real right-click menus paste files/folders and copy local files/received folders to the native clipboard; drop data, recursion and explicit send confirmation; no remote transfer.");
         } finally { Directory.Delete(root, true); }

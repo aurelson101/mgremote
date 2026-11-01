@@ -12,7 +12,7 @@ namespace MGRemote.Linux;
 internal static class DesktopAppearance
 {
     internal static readonly IBrush Surface = Brush.Parse("#ffffff");
-    internal static readonly IBrush Chrome = Brush.Parse("#f0f1f2");
+    internal static readonly IBrush Chrome = Brush.Parse("#f4f5f7");
     internal static readonly IBrush Divider = Brush.Parse("#c9cdd2");
     internal static readonly IBrush Text = Brush.Parse("#28313a");
     internal static readonly IBrush MutedText = Brush.Parse("#65717c");
@@ -47,9 +47,12 @@ internal static class DesktopAppearance
             foreach (var setter in setters) style.Setters.Add(setter);
             app.Styles.Add(style);
         }
+        Style(s => s.OfType<Window>(),
+            new Setter(TemplatedControl.FontFamilyProperty, new FontFamily("Noto Sans, DejaVu Sans")),
+            new Setter(TemplatedControl.FontSizeProperty, 13d));
         Style(s => s.OfType<Button>(),
-            new Setter(TemplatedControl.FontSizeProperty, 12d),
-            new Setter(Layoutable.MinHeightProperty, 26d),
+            new Setter(TemplatedControl.FontSizeProperty, 13d),
+            new Setter(Layoutable.MinHeightProperty, 30d),
             new Setter(TemplatedControl.PaddingProperty, new Thickness(8, 3)),
             new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(2)),
             new Setter(TemplatedControl.BackgroundProperty, Chrome),
@@ -66,15 +69,15 @@ internal static class DesktopAppearance
         Style(s => s.OfType<Menu>(),
             new Setter(TemplatedControl.BackgroundProperty, Chrome),
             new Setter(TemplatedControl.ForegroundProperty, Text),
-            new Setter(Layoutable.MinHeightProperty, 26d));
+            new Setter(Layoutable.MinHeightProperty, 30d));
         Style(s => s.OfType<MenuItem>(),
-            new Setter(TemplatedControl.FontSizeProperty, 12d),
+            new Setter(TemplatedControl.FontSizeProperty, 13d),
             new Setter(TemplatedControl.PaddingProperty, new Thickness(8, 3)),
-            new Setter(Layoutable.MinHeightProperty, 24d));
+            new Setter(Layoutable.MinHeightProperty, 34d));
         Style(s => s.OfType<TabStripItem>(),
-            new Setter(TemplatedControl.FontSizeProperty, 12d),
+            new Setter(TemplatedControl.FontSizeProperty, 13d),
             new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 4)),
-            new Setter(Layoutable.MinHeightProperty, 28d));
+            new Setter(Layoutable.MinHeightProperty, 34d));
         Style(s => s.OfType<TabStripItem>().Class(":selected"),
             new Setter(TemplatedControl.BackgroundProperty, Surface),
             new Setter(TemplatedControl.BorderBrushProperty, Divider),
@@ -93,11 +96,19 @@ internal static class DesktopAppearance
         }
         Style(s => s.Class("toolstrip").Descendant().OfType<Button>(),
             new Setter(TemplatedControl.PaddingProperty, new Thickness(8, 2)),
-            new Setter(Layoutable.MinHeightProperty, 25d),
+            new Setter(Layoutable.MinHeightProperty, 30d),
             new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(0)),
             new Setter(TemplatedControl.BackgroundProperty, Brushes.Transparent));
+        Style(s => s.OfType<Button>().Class("primary-action"),
+            new Setter(TemplatedControl.BackgroundProperty, Brush.Parse("#e0e8f0")),
+            new Setter(TemplatedControl.BorderBrushProperty, Brush.Parse("#a9b9c8")),
+            new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(1)),
+            new Setter(TemplatedControl.FontWeightProperty, FontWeight.SemiBold));
+        Style(s => s.OfType<TreeViewItem>(),
+            new Setter(TemplatedControl.FontSizeProperty, 13d),
+            new Setter(TemplatedControl.MinHeightProperty, 28d));
         Style(s => s.OfType<TextBlock>().Class("dock-title"),
-            new Setter(TextBlock.FontSizeProperty, 12d),
+            new Setter(TextBlock.FontSizeProperty, 13d),
             new Setter(TextBlock.FontWeightProperty, FontWeight.SemiBold),
             new Setter(TextBlock.ForegroundProperty, Text),
             new Setter(TextBlock.PaddingProperty, new Thickness(7, 4)),
@@ -107,8 +118,8 @@ internal static class DesktopAppearance
         // Compact property editors only; modal prompts retain their natural sizes.
         foreach (Type type in new[] { typeof(TextBox), typeof(ComboBox), typeof(NumericUpDown) }) {
             Style(s => s.Class("properties").Descendant().OfType(type),
-                new Setter(TemplatedControl.FontSizeProperty, 12d),
-                new Setter(Layoutable.MinHeightProperty, 24d),
+                new Setter(TemplatedControl.FontSizeProperty, 13d),
+                new Setter(Layoutable.MinHeightProperty, 28d),
                 new Setter(TemplatedControl.PaddingProperty, new Thickness(5, 2)),
                 new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(0)),
                 new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(0)),
@@ -117,13 +128,13 @@ internal static class DesktopAppearance
         }
         Style(s => s.Class("properties").Descendant().OfType<Expander>(),
             new Setter(Layoutable.MinWidthProperty, 0d),
-            new Setter(Layoutable.MinHeightProperty, 24d),
+            new Setter(Layoutable.MinHeightProperty, 28d),
             new Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
             new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(0)),
             new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(0)));
         Style(s => s.Class("properties").Descendant().OfType<CheckBox>(),
-            new Setter(Layoutable.MinHeightProperty, 24d),
-            new Setter(TemplatedControl.FontSizeProperty, 12d),
+            new Setter(Layoutable.MinHeightProperty, 28d),
+            new Setter(TemplatedControl.FontSizeProperty, 13d),
             new Setter(TemplatedControl.PaddingProperty, new Thickness(4, 1)));
     }
 }

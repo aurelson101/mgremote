@@ -26,9 +26,19 @@ public sealed partial class MainWindow
         CloseSession(_tabs.Last());
         Console.WriteLine("PASS: RDP shared-path clipboard shortcut and SSH session-to-SFTP toolbar; no remote connection.");
     }
-    private Control SessionWorkspace(Connection connection, EmbeddedSession native, TextBlock status)
+    private Control SessionWorkspace(Connection connection, EmbeddedSession native, TextBlock status, Func<Task>? reconnect = null)
     {
         var tools = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6) };
+        bool retrying = false;
+        if (reconnect != null) {
+            var retry = Button("Reconnecter", async () => {
+                if (!retrying) { retrying = true; try { await reconnect(); } finally { retrying = false; } }
+            });
+            retry.IsEnabled = native.ExitCode != null || native.StartupFailed;
+            native.Completed += _ => retry.IsEnabled = true;
+            native.Failed += _ => retry.IsEnabled = true;
+            tools.Children.Add(retry);
+        }
         if (connection.Protocol == "SSH") {
             tools.Children.Add(Button("Fichiers / dossiers SFTP", () => {
                 try { RequireLoadedProfile(); AddSession(new SessionTab("SFTP · " + connection.Name, new FileTransferPane(connection, () => UnlockConnection(connection)))); }
