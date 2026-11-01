@@ -34,6 +34,15 @@ internal static class ConnectionSettingsTests
         Check(SessionLauncher.Arguments(rdp with { RdpResolution = "dynamic" }).Contains("/dynamic-resolution"));
         Check(SessionLauncher.Arguments(rdp with { RdpResolution = "fullscreen", MultiMonitor = true }).Count(a => a == "/f") == 1);
         Check(!SessionLauncher.Arguments(rdp with { MultiMonitor = true }).Any(a => a.StartsWith("/size:") || a == "/dynamic-resolution"));
+        const string clipboardFiles = "/clipboard:use-selection:CLIPBOARD,direction-to:all,files-to:all";
+        Check(SessionLauncher.Arguments(rdp with { Clipboard = true, RdpFileClipboard = true }).Contains(clipboardFiles));
+        Check(SessionLauncher.Arguments(rdp with { Clipboard = true }, modernRdpClipboard: true).Contains("/clipboard:use-selection:CLIPBOARD,direction-to:all,files-to:off"));
+        Check(SessionLauncher.Arguments(rdp with { Clipboard = true }).Contains("+clipboard"));
+        Check(SessionLauncher.Arguments(rdp, modernRdpClipboard: true).Contains("-clipboard"));
+        Reject(() => Connections.Validate(rdp with { Clipboard = false, RdpFileClipboard = true }));
+        Reject(() => Connections.Validate(ssh with { Clipboard = true, RdpFileClipboard = true }));
+        var fileClip = System.Text.Json.JsonSerializer.Deserialize<Connection>(System.Text.Json.JsonSerializer.Serialize(rdp with { Clipboard = true, RdpFileClipboard = true }))!;
+        Check(fileClip.RdpFileClipboard && fileClip.Clipboard);
         Reject(() => Connections.Validate(rdp with { RdpResolution = "custom /cert:ignore" }));
         Reject(() => Connections.Validate(rdp with { RdpWidth = 0 }));
         Reject(() => Connections.Validate(rdp with { RdpHeight = 8193 }));

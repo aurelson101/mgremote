@@ -114,7 +114,7 @@ public sealed partial class MainWindow
             }
             var status = new TextBlock { Text = "Initialisation…", Margin = new Thickness(8), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
             var native = new EmbeddedSession(parent => { var start = SessionLauncher.Embedded(model, sftp, parent); ownedCredentials?.Configure(start, model.Protocol); return start; }, text => { status.Text = text; _status.Text = text; });
-            var content = SessionContent(native, status);
+            var content = SessionWorkspace(model, native, status);
             AddSession(new SessionTab((sftp ? "SFTP · " : "") + model.Name, content, native, Credentials: ownedCredentials)); credentials = null;
         } catch (OperationCanceledException) { credentials?.Dispose(); _status.Text = "Connexion annulée."; }
         catch (Exception ex) {
@@ -181,6 +181,12 @@ public sealed partial class MainWindow
             if (alive) throw new Exception("An owned terminal process survived tab closure.");
         }
         using var transfer = new FileTransferPane(new Connection { Name = "Fixture", Host = "example.invalid" }); await transfer.VerifyValidation();
+        using var clipboardTransfer = new FileTransferPane(new Connection { Name = "Clipboard fixture", Host = "fixture.example.invalid" });
+        var transferTab = new SessionTab("Transferts — fichier et dossier", clipboardTransfer);
+        try {
+            AddSession(transferTab); await Task.Delay(150);
+            await clipboardTransfer.VerifyClipboardUi(Environment.GetCommandLineArgs().Single(a => a.StartsWith("--smoke-ui="))[11..].Replace(".png", "-transfer.png"));
+        } finally { CloseSession(transferTab); }
         Console.WriteLine("PASS: embedded tabs, idle resize suppression, real PID cleanup and transfer UI validation.");
         foreach (string executable in new[] { "/usr/bin/false", "/nonexistent/mgremote-fixture", "/usr/bin/sleep" }) {
             var status = new TextBlock();

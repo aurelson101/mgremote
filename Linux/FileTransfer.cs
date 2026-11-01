@@ -8,6 +8,24 @@ public sealed record TransferPlan(string Executable, List<string> Arguments, str
 
 public static class FileTransfer
 {
+    internal const int MaxSources = 100;
+    internal static string[] Sources(string text)
+    {
+        var files = text.Split(['\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).ToArray();
+        if (files.Length is < 1 or > MaxSources) throw new ArgumentException("Choisissez entre 1 et 100 fichiers/dossiers locaux (un chemin par ligne).");
+        return files.Select(SessionLauncher.IdentityPath).ToArray();
+    }
+    internal static List<string> UploadArguments(Connection connection, IReadOnlyList<string> sources, string remote, bool recursive)
+    {
+        if (sources.Count is < 1 or > MaxSources) throw new ArgumentException("Un envoi accepte entre 1 et 100 éléments.");
+        if (sources.Count > 1 && !remote.EndsWith('/')) throw new ArgumentException("Pour plusieurs éléments, choisissez un dossier distant existant et terminez son chemin par /.");
+        if (sources.Select(p => Path.GetFileName(Path.TrimEndingDirectorySeparator(p))).Distinct(StringComparer.OrdinalIgnoreCase).Count() != sources.Count)
+            throw new ArgumentException("Plusieurs sources ont le même nom (sans tenir compte de la casse). Renommez-les ou effectuez des envois séparés pour éviter un écrasement.");
+        var args = Arguments(connection, sources[0], remote, false, recursive);
+        string destination = args[^1]; args.RemoveRange(args.Count - 2, 2);
+        foreach (string source in sources) { _ = Arguments(connection, source, remote, false, recursive); args.Add(Path.GetFullPath(source)); }
+        args.Add(destination); return args;
+    }
     public static List<string> Arguments(Connection connection, string local, string remote, bool download, bool recursive)
     {
         Connections.Validate(connection);
@@ -48,6 +66,27 @@ public static class FileTransfer
     public static async Task<TransferPlan> Prepare(Connection connection, string local, string remote, bool download, bool recursive, CancellationToken cancellation)
     {
         _ = Arguments(connection, local, remote, download, recursive);
+        string executable = await Client(connection, cancellation);
+        cancellation.ThrowIfCancellationRequested();
+        string target = Path.GetFullPath(local);
+        if (download) {
+            if (!Directory.Exists(target) || new DirectoryInfo(target).LinkTarget != null) throw new IOException("Choisissez un dossier local existant, sans lien symbolique.");
+            target = Path.Combine(target, "MGRemote-transfer-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(target, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        } else ValidateUpload(target, recursive, cancellation);
+        return new TransferPlan(executable, Arguments(connection, target, remote, download, recursive), target);
+    }
+    internal static async Task<TransferPlan> PrepareUpload(Connection connection, IReadOnlyList<string> sources, string remote, bool recursive, CancellationToken cancellation)
+    {
+        var args = UploadArguments(connection, sources, remote, recursive);
+        string executable = await Client(connection, cancellation);
+        foreach (string source in sources) ValidateUpload(source, recursive, cancellation);
+        cancellation.ThrowIfCancellationRequested();
+        return new TransferPlan(executable, args, string.Join(Environment.NewLine, sources));
+    }
+    private static async Task<string> Client(Connection connection, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
         SessionLauncher.ValidateIdentity(connection);
         string executable = SessionLauncher.Find("scp"), ssh = SessionLauncher.Find("ssh");
         using (var version = new Process { StartInfo = new ProcessStartInfo(ssh, "-V") { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true } }) {
@@ -57,13 +96,6 @@ public static class FileTransfer
             var match = Regex.Match(await error + await output, @"OpenSSH_(\d+)\.");
             if (!match.Success || int.Parse(match.Groups[1].Value) < 9) throw new IOException("OpenSSH 9 ou plus récent est requis pour utiliser SFTP sans ancien protocole SCP.");
         }
-        cancellation.ThrowIfCancellationRequested();
-        string target = Path.GetFullPath(local);
-        if (download) {
-            if (!Directory.Exists(target) || new DirectoryInfo(target).LinkTarget != null) throw new IOException("Choisissez un dossier local existant, sans lien symbolique.");
-            target = Path.Combine(target, "MGRemote-transfer-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(target, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        } else ValidateUpload(target, recursive, cancellation);
-        return new TransferPlan(executable, Arguments(connection, target, remote, download, recursive), target);
+        return executable;
     }
 }

@@ -37,6 +37,7 @@ public sealed record Connection
     public bool RdpShareEnabled { get; set; }
     public string RdpSharePath { get; set; } = "";
     public bool Clipboard { get; set; }
+    public bool RdpFileClipboard { get; set; }
     public bool MultiMonitor { get; set; }
     public int BaudRate { get; set; } = 9600;
     public int DataBits { get; set; } = 8;
@@ -159,6 +160,7 @@ public static class Connections
         }
         if (!(allowDraft && c.IsDraft && c.Host.Length == 0) && !Regex.IsMatch(c.Host, @"\A[A-Za-z0-9_\[\]][A-Za-z0-9_.:\[\]-]{0,252}\z")) throw new ArgumentException("Renseignez un hôte/IP ou alias SSH valide avant connexion.");
         if (c.Protocol != "SSH" && c.Protocol != "RDP") throw new ArgumentException("Protocole non pris en charge.");
+        if (c.RdpFileClipboard && (c.Protocol != "RDP" || !c.Clipboard)) throw new ArgumentException("Le copier/coller de fichiers nécessite une connexion RDP avec presse-papiers actif.");
         if (c.Port is < 1 or > 65535) throw new ArgumentException("Port invalide.");
         foreach (string text in new[] { c.User, c.Domain })
             if (text.Length > 256 || text.Any(char.IsControl) || text.StartsWith('-')) throw new ArgumentException("Utilisateur ou domaine invalide.");
@@ -242,7 +244,7 @@ public static class Connections
 public static class SessionLauncher
 {
     internal const string ClipboardTranslations = "XTerm*VT100.translations: #override\\n Ctrl Shift <Key>C: copy-selection(CLIPBOARD)\\n Ctrl Shift <Key>V: insert-selection(CLIPBOARD)";
-    public static List<string> Arguments(Connection c, bool sftp = false)
+    public static List<string> Arguments(Connection c, bool sftp = false, bool modernRdpClipboard = false)
     {
         Connections.Validate(c);
         if (c.Protocol == "Serial") {
@@ -259,7 +261,8 @@ public static class SessionLauncher
             else if (!c.MultiMonitor) rdp.Add("/f");
             if (c.User.Length > 0) rdp.Add("/u:" + c.User);
             if (c.Domain.Length > 0) rdp.Add("/d:" + c.Domain);
-            rdp.Add(c.Clipboard ? "+clipboard" : "-clipboard");
+            rdp.Add(!c.Clipboard ? "-clipboard" : c.RdpFileClipboard || modernRdpClipboard
+                ? "/clipboard:use-selection:CLIPBOARD,direction-to:all,files-to:" + (c.RdpFileClipboard ? "all" : "off") : "+clipboard");
             rdp.Add("/bpp:" + c.ColorDepth); rdp.Add("/audio-mode:" + c.AudioMode);
             if (c.ConsoleSession) rdp.Add("/admin");
             if (c.GatewayHost.Length > 0) rdp.Add("/gateway:g:" + c.GatewayHost + ",usage-method:" + c.GatewayMode);
@@ -361,26 +364,28 @@ public static class SessionLauncher
                 throw new IOException("Un certificat public OpenSSH signé (-cert.pub) est requis.");
         }
     }
-    private static string Executable(Connection c, bool sftp) => c.Protocol == "Serial" ? Find("picocom") : c.Protocol == "RDP" ? Find("xfreerdp3", "xfreerdp") : Find(sftp ? "sftp" : "ssh");
+    private static string Executable(Connection c, bool sftp) => c.Protocol == "Serial" ? Find("picocom") : c.Protocol == "RDP" ? (c.RdpFileClipboard ? Find("xfreerdp3") : Find("xfreerdp3", "xfreerdp")) : Find(sftp ? "sftp" : "ssh");
     internal static ProcessStartInfo ExternalStart(Connection c, bool sftp = false)
     {
         ValidateIdentity(c);
-        var arguments = Arguments(c, sftp);
+        string executable = Executable(c, sftp);
+        var arguments = Arguments(c, sftp, Path.GetFileName(executable) == "xfreerdp3");
         // xterm stays in the foreground; desktop terminal launchers may detach through D-Bus.
         var start = TerminalStart();
-        foreach (string arg in new[] { "-hold", "-xrm", "XTerm*allowWindowOps: false", "-xrm", ClipboardTranslations, "-title", "MGRemote · " + c.Name, "-e", Executable(c, sftp) }) start.ArgumentList.Add(arg);
+        foreach (string arg in new[] { "-hold", "-xrm", "XTerm*allowWindowOps: false", "-xrm", ClipboardTranslations, "-title", "MGRemote · " + c.Name, "-e", executable }) start.ArgumentList.Add(arg);
         foreach (var arg in arguments) start.ArgumentList.Add(arg);
         return start;
     }
     public static ProcessStartInfo Embedded(Connection c, bool sftp, uint parent)
     {
         ValidateIdentity(c);
-        var args = Arguments(c, sftp);
+        string executable = Executable(c, sftp);
+        var args = Arguments(c, sftp, Path.GetFileName(executable) == "xfreerdp3");
         if (c.Protocol == "RDP") {
             if (c.MultiMonitor) throw new NotSupportedException("Le multi-écran RDP utilise encore le mode externe sous Linux. Utilisez Sessions → Ouvrir en fenêtre externe.");
             args.Add("/parent-window:" + parent.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
-        return Terminal(parent, Executable(c, sftp), args);
+        return Terminal(parent, executable, args);
     }
     internal static ProcessStartInfo Terminal(uint parent, string executable, IEnumerable<string> arguments)
     {

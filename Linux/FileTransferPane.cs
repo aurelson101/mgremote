@@ -1,17 +1,19 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 
 namespace MGRemote.Linux;
 
-public sealed class FileTransferPane : UserControl, IDisposable
+public sealed partial class FileTransferPane : UserControl, IDisposable
 {
     private readonly Connection _connection;
     private readonly Func<Task<CredentialBroker?>>? _unlock;
     private CredentialBroker? _credentials;
     private readonly ComboBox _direction = new() { ItemsSource = new[] { "Envoyer vers le serveur", "Télécharger depuis le serveur" }, SelectedIndex = 0 };
-    private readonly TextBox _local = new() { PlaceholderText = "Fichier/dossier local, ou dossier de réception" }, _remote = new() { PlaceholderText = "/chemin/distant/absolu ou C:/chemin" };
+    private readonly TextBox _local = new() { PlaceholderText = "Fichiers/dossiers locaux (un chemin par ligne), ou dossier de réception", AcceptsReturn = true, MinHeight = 42, MaxHeight = 90 }, _remote = new() { PlaceholderText = "/chemin/distant/absolu ou C:/chemin" };
     private readonly CheckBox _recursive = new() { Content = "Dossier / récursif" }, _overwrite = new() { Content = "J’autorise le remplacement des fichiers de même nom sur le serveur." };
     private readonly TextBlock _status = new() { Text = "Les clés et le profil SSH sont repris de la connexion. Les secrets importés restent chiffrés au repos.", TextWrapping = Avalonia.Media.TextWrapping.Wrap };
     private readonly Button _start = new() { Content = "Démarrer le transfert" };
@@ -21,70 +23,126 @@ public sealed class FileTransferPane : UserControl, IDisposable
     private EmbeddedSession? _session;
     private bool _busy, _disposed;
     private Task _operation = Task.CompletedTask;
+    private string? _localTarget;
     internal Task ShutdownCompletion { get; private set; } = Task.CompletedTask;
     internal FileTransferPane(Connection connection, Func<Task<CredentialBroker?>>? unlock = null)
     {
         _connection = connection; _unlock = unlock;
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Margin = new Thickness(12) };
+        Background = DesktopAppearance.Surface; Foreground = DesktopAppearance.Text;
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Margin = new Thickness(12), Background = DesktopAppearance.Surface };
         var form = new StackPanel { Spacing = 8 };
         form.Children.Add(new TextBlock { Text = "Transfert SFTP — " + connection.Name, FontSize = 18 }); form.Children.Add(_direction);
-        form.Children.Add(_local); form.Children.Add(_remote); form.Children.Add(_recursive); form.Children.Add(_overwrite);
+        form.Children.Add(new TextBlock { Text = "Local — déposez ou collez des fichiers et dossiers" });
+        form.Children.Add(_local); form.Children.Add(new TextBlock { Text = "Distant — dossier existant terminé par / pour un envoi multiple" }); form.Children.Add(_remote); form.Children.Add(_recursive); form.Children.Add(_overwrite);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal };
         var browse = new Button { Content = "Parcourir…", Margin = new Thickness(0, 0, 8, 0) }; browse.Click += async (_, _) => await Browse();
         var stop = new Button { Content = "Annuler / fermer le transfert", Margin = new Thickness(8, 0, 0, 0) }; stop.Click += async (_, _) => await Cancel();
         _start.Click += async (_, _) => { _operation = Start(); await _operation; }; actions.Children.Add(browse); actions.Children.Add(_start); actions.Children.Add(stop); form.Children.Add(actions);
+        var clipboard = new WrapPanel { Orientation = Orientation.Horizontal };
+        Button Action(string title, Func<Task> action) { var button = new Button { Content = title, Margin = new Thickness(0, 0, 6, 4) }; button.Click += async (_, _) => { try { await action(); } catch (Exception ex) { if (!_disposed) _status.Text = ex.Message; } }; return button; }
+        clipboard.Children.Add(Action("Coller fichiers à envoyer", PasteFiles));
+        clipboard.Children.Add(Action("Coller chemin distant", async () => {
+            if (_busy || _session != null || _disposed) return;
+            string text = (await Clipboard().TryGetTextAsync())?.Trim() ?? "";
+            if (text.Length is < 1 or > 4096 || text.Any(char.IsControl)) throw new IOException("Copiez un seul chemin distant absolu (4096 caractères maximum).");
+            if (!_disposed && !_busy && _session == null) _remote.Text = text;
+        }));
+        clipboard.Children.Add(Action("Ouvrir le dossier local", () => { OpenLocalFolder(); return Task.CompletedTask; }));
+        form.Children.Add(clipboard);
         form.Children.Add(new TextBlock { Text = "Téléchargement dans un nouveau sous-dossier. Les fichiers partiels sont conservés en cas d’annulation. Le terminal ci-dessous affiche la progression et les demandes d’authentification.", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-        form.Children.Add(_destination); root.Children.Add(new ScrollViewer { Content = form, MaxHeight = 320 }); _status.Margin = new Thickness(0, 10); Grid.SetRow(_status, 1); root.Children.Add(_status);
+        form.Children.Add(_destination); root.Children.Add(new ScrollViewer { Content = form, MaxHeight = 390 }); _status.Margin = new Thickness(0, 10); Grid.SetRow(_status, 1); root.Children.Add(_status);
         Grid.SetRow(_progress, 2); root.Children.Add(_progress); Content = root;
         _direction.SelectionChanged += (_, _) => { _overwrite.IsVisible = _direction.SelectedIndex == 0; _overwrite.IsChecked = false; };
+        DragDrop.SetAllowDrop(_local, true);
+        _local.AddHandler(DragDrop.DragOverEvent, (_, e) => { e.DragEffects = !_busy && !_disposed && _session == null && e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; });
+        _local.AddHandler(DragDrop.DropEvent, (_, e) => {
+            try { if (!_busy && !_disposed && _session == null) ApplyFiles(e.DataTransfer.TryGetFiles() ?? []); }
+            catch (Exception ex) { _status.Text = ex.Message; }
+            e.Handled = true;
+        });
         DetachedFromVisualTree += (_, _) => Dispose();
+    }
+    private IClipboard Clipboard() => TopLevel.GetTopLevel(this)?.Clipboard ?? throw new IOException("Presse-papiers indisponible.");
+    private void ApplyFiles(IEnumerable<IStorageItem> files)
+    {
+        var paths = files.Take(FileTransfer.MaxSources + 1).Select(f => f.TryGetLocalPath() ?? throw new IOException("Seuls les fichiers et dossiers locaux peuvent être envoyés.")).ToArray();
+        if (paths.Length is < 1 or > FileTransfer.MaxSources || paths.Any(p => p.Any(char.IsControl))) throw new IOException("Collez entre 1 et 100 chemins locaux sans caractères de contrôle.");
+        _direction.SelectedIndex = 0; _overwrite.IsChecked = false;
+        _local.Text = string.Join(Environment.NewLine, paths); _recursive.IsChecked = paths.Any(Directory.Exists);
+        _status.Text = paths.Length + " élément(s) prêts. Vérifiez la destination et confirmez l’envoi ; aucun transfert n’a démarré.";
+    }
+    private async Task PasteFiles()
+    {
+        if (_busy || _disposed || _session != null) return;
+        var files = await Clipboard().TryGetFilesAsync();
+        if (!_disposed && !_busy && _session == null) ApplyFiles(files ?? []);
+    }
+    private void OpenLocalFolder()
+    {
+        string? path = _localTarget;
+        if (path == null) {
+            string local = FileTransfer.Sources(_local.Text ?? "")[0];
+            path = Directory.Exists(local) ? local : Path.GetDirectoryName(local);
+        }
+        else if (!Directory.Exists(path)) path = Path.GetDirectoryName(path);
+        if (path == null || !Directory.Exists(path)) throw new IOException("Choisissez d’abord un dossier local existant.");
+        var start = new System.Diagnostics.ProcessStartInfo(SessionLauncher.Find("xdg-open")) { UseShellExecute = false }; start.ArgumentList.Add(path);
+        using var process = System.Diagnostics.Process.Start(start);
     }
     private async Task Browse()
     {
+        if (_busy || _disposed || _session != null) return;
         try {
             var storage = TopLevel.GetTopLevel(this)?.StorageProvider ?? throw new IOException("Sélecteur de fichiers indisponible.");
             if (_direction.SelectedIndex == 1 || _recursive.IsChecked == true) {
                 var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Dossier local", AllowMultiple = false });
-                if (folders.Count > 0) _local.Text = folders[0].TryGetLocalPath();
+                if (folders.Count > 0 && !_disposed && !_busy && _session == null) _local.Text = folders[0].TryGetLocalPath();
             } else {
-                var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Fichier local à envoyer", AllowMultiple = false });
-                if (files.Count > 0) _local.Text = files[0].TryGetLocalPath();
+                var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Fichiers locaux à envoyer", AllowMultiple = true });
+                if (files.Count > 0 && !_disposed && !_busy && _session == null) ApplyFiles(files);
             }
         } catch (Exception ex) { if (!_disposed) _status.Text = ex.Message; }
     }
     private async Task Start()
     {
         if (_busy || _disposed || _session != null) return;
-        _busy = true; _start.IsEnabled = false;
+        _busy = true; _start.IsEnabled = false; EnableInputs(false);
         var cancel = new CancellationTokenSource(); _cancel = cancel;
         try {
             bool download = _direction.SelectedIndex == 1, recursive = _recursive.IsChecked == true;
             if (!download && _overwrite.IsChecked != true) throw new ArgumentException("Confirmez le remplacement éventuel des fichiers sur le serveur avant l’envoi.");
             string local = _local.Text?.Trim() ?? "", remote = _remote.Text?.Trim() ?? "";
-            _ = FileTransfer.Arguments(_connection, local, remote, download, recursive);
+            string[] sources = download ? [] : FileTransfer.Sources(local);
+            if (download) { local = SessionLauncher.IdentityPath(local); _ = FileTransfer.Arguments(_connection, local, remote, true, recursive); }
+            else _ = FileTransfer.UploadArguments(_connection, sources, remote, recursive);
             _status.Text = "Vérification du client et des fichiers locaux…";
-            var plan = await Task.Run(() => FileTransfer.Prepare(_connection, local, remote, download, recursive, cancel.Token), cancel.Token);
+            var plan = await Task.Run(() => download ? FileTransfer.Prepare(_connection, local, remote, true, recursive, cancel.Token) : FileTransfer.PrepareUpload(_connection, sources, remote, recursive, cancel.Token), cancel.Token);
             cancel.Token.ThrowIfCancellationRequested(); if (_disposed) return;
             _credentials = _unlock == null ? null : await _unlock();
             if (_disposed || cancel.IsCancellationRequested) { _credentials?.Dispose(); _credentials = null; return; }
             _session = new EmbeddedSession(parent => { var start = SessionLauncher.Terminal(parent, plan.Executable, plan.Arguments); _credentials?.Configure(start, "SSH"); return start; }, message => { if (!_disposed) _status.Text = message; });
-            _destination.Text = download ? "Dossier de réception : " + plan.LocalTarget : "Source locale : " + plan.LocalTarget;
-            _progress.Content = _session; _status.Text = "Transfert lancé. Destination locale : " + plan.LocalTarget + ". Fermez/annulez pour interrompre la session.";
+            _localTarget = download ? plan.LocalTarget : Path.GetDirectoryName(sources[0]);
+            _destination.Text = download ? "Dossier de réception : " + plan.LocalTarget : sources.Length + " élément(s) locaux à envoyer.";
+            _progress.Content = _session; _status.Text = download ? "Téléchargement lancé dans " + plan.LocalTarget + ". Le terminal affiche la progression." : "Envoi de " + sources.Length + " élément(s). Le terminal affiche la progression ; Annuler / fermer arrête la session.";
         } catch (OperationCanceledException) { if (!_disposed) _status.Text = "Préparation annulée ; aucun transfert démarré."; }
         catch (Exception ex) { if (!_disposed) _status.Text = "Transfert : " + ex.Message; }
-        finally { _busy = false; if (ReferenceEquals(_cancel, cancel)) _cancel = null; cancel.Dispose(); if (!_disposed) _start.IsEnabled = _session == null; }
+        finally { _busy = false; if (ReferenceEquals(_cancel, cancel)) _cancel = null; cancel.Dispose(); if (!_disposed) { _start.IsEnabled = _session == null; EnableInputs(_session == null); } }
     }
     private async Task Cancel()
     {
         _credentials?.Dispose(); _credentials = null;
         _cancel?.Cancel(); var session = _session; _session = null; _progress.Content = null;
         if (session != null) { session.Dispose(); ShutdownCompletion = session.ShutdownCompletion; await ShutdownCompletion; }
-        if (!_disposed) { _start.IsEnabled = !_busy; _status.Text = "Session de transfert fermée. Les fichiers partiels sont conservés."; }
+        if (!_disposed) { _start.IsEnabled = !_busy; EnableInputs(!_busy); _status.Text = "Session de transfert fermée. Les fichiers partiels sont conservés."; }
+    }
+    private void EnableInputs(bool enabled)
+    {
+        _local.IsEnabled = _remote.IsEnabled = _direction.IsEnabled = _recursive.IsEnabled = _overwrite.IsEnabled = enabled;
     }
     internal async Task VerifyValidation()
     {
         _direction.SelectedIndex = 1; await Start();
-        if (_session != null || _status.Text?.Contains("chemin local") != true) throw new Exception("Transfer UI did not reject an empty path before any operation.");
+        if (_session != null || _status.Text?.Contains("chemin", StringComparison.OrdinalIgnoreCase) != true) throw new Exception("Transfer UI did not reject an empty path before any operation.");
         string directory = Path.Combine(Path.GetTempPath(), "mgremote-transfer-cancel-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

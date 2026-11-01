@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.15 — development preview
+# MGRemote Linux Desktop 0.2.16 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -118,3 +118,9 @@ At startup, the last successfully opened profile is preselected (only its local 
 ## Development update 0.2.15: directly entered SSH home paths
 
 Paths such as `~/.ssh/ia` are expanded to the current user’s home directory during validation and SSH/SFTP command construction, including certificate paths. Previously only the file-selection dialog expanded `~/`. Stored profile paths are preserved, and no shell expansion is used.
+
+## Development update 0.2.16: bidirectional clipboard and file workflows
+
+SSH text keeps Ctrl+Shift+C/V in the terminal. Each SSH session now offers a direct SFTP shortcut. The SFTP pane accepts native clipboard files/folders, drag-and-drop, multiple file selection and one local path per line (up to 100 elements). Folder mode is selected when a pasted/dropped directory is present. Multiple uploads require an existing remote directory ending with `/`; duplicate source basenames, including case-only differences, are rejected to prevent collisions. Pasting or dropping only prepares the form: sending still requires explicit overwrite confirmation. Downloads support recursive folders and use a new private reception directory. Inputs are frozen during preparation/transfer; close the transfer before preparing another.
+
+RDP text/image clipboard remains available. The explicit bidirectional file mode requires the xfreerdp3 executable and uses [FreeRDP 3 clipboard direction options](https://github.com/FreeRDP/FreeRDP/blob/3.0.0/client/common/cmdline.c). With FreeRDP 3, files are disabled when that mode is unchecked; older clients keep their existing global clipboard behavior. For folders and a consistent file workflow, configure an explicit shared local directory and access `\\tsclient\MGRemote` from the remote Windows Explorer. The session toolbar copies this path or opens the local directory. Only the selected directory is shared. Server policies and client support may limit clipboard formats; remote RDP/SSH servers still require live validation.

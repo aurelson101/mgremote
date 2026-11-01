@@ -50,6 +50,7 @@ public sealed class App : Application
                     await ((MainWindow)window).VerifyPortableProfileUi();
                     await ((MainWindow)window).VerifyKeySelection();
                     await ((MainWindow)window).VerifyProfileWorkflowUi();
+                    await ((MainWindow)window).VerifySessionTransferTools();
                     ((MainWindow)window).VerifyTabClosing();
                     await ((MainWindow)window).VerifyDesktopUi();
                     await ((MainWindow)window).VerifyEmbeddedSessions();
@@ -96,7 +97,7 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel _serialFields = new() { Spacing = 0, IsVisible = false };
     private readonly TextBox _search = new() { Watermark = "Rechercher une connexion…" };
     private readonly Button _sftp;
-    private readonly CheckBox _clipboard = new() { Content = "Presse-papiers RDP bidirectionnel (texte)" };
+    private readonly CheckBox _clipboard = new() { Content = "Presse-papiers RDP bidirectionnel" };
     private readonly CheckBox _multi = new() { Content = "RDP sur plusieurs écrans" };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private Connection? _editing;
@@ -104,7 +105,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         _defaultProfilePath = _dataPath;
-        Title = "MGRemote — Linux Desktop 0.2.15"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.16"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
@@ -177,7 +178,10 @@ public sealed partial class MainWindow : Window
         Add(connectionFields, "Utilisateur", _user); Add(connectionFields, "Domaine RDP", _domain);
         _sshSection.Content = BuildSshProperties(); CompactCategory(_sshSection); _propertyGroups.Add(_sshSection); fields.Children.Add(_sshSection);
         Add(_serialFields, "Bauds", _baud); Add(_serialFields, "Bits", _bits); Add(_serialFields, "Parité", _parity); Add(_serialFields, "Stop", _stop); Add(_serialFields, "Flux", _flow); fields.Children.Add(_serialFields);
-        _rdpFields.Children.Add(_clipboard); _rdpFields.Children.Add(_multi);
+        _rdpFields.Children.Add(_clipboard); _rdpFields.Children.Add(_rdpFileClipboard); _rdpFields.Children.Add(_multi);
+        _rdpFileClipboard.IsEnabled = _clipboard.IsChecked == true;
+        ToolTip.SetTip(_rdpFileClipboard, "Nécessite xfreerdp3. Pour les dossiers et les clients plus anciens, utilisez le dossier partagé. Les stratégies du serveur peuvent limiter les échanges.");
+        _clipboard.IsCheckedChanged += (_, _) => { _rdpFileClipboard.IsEnabled = _clipboard.IsChecked == true; if (_clipboard.IsChecked != true) _rdpFileClipboard.IsChecked = false; };
         Add(_rdpFields, "Résolution", _resolution); Add(_rdpFields, "Largeur", _rdpWidth); Add(_rdpFields, "Hauteur", _rdpHeight);
         _resolution.SelectionChanged += (_, _) => UpdateAdvancedProperties(); _multi.IsCheckedChanged += (_, _) => UpdateAdvancedProperties();
         _rdpFields.Children.Add(_share); Add(_rdpFields, "Dossier partagé", BrowseField(_sharePath, "Choisir le dossier partagé RDP", async () => await ChooseRdpFolder()));

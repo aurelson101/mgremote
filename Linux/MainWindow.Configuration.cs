@@ -10,6 +10,7 @@ public sealed partial class MainWindow
 {
     private readonly ComboBox _icon = new() { ItemsSource = new[] { "Auto", "Windows", "Linux", "Network", "Serial" }, SelectedIndex = 0 };
     private readonly TextBox _certificate = new() { PlaceholderText = "Certificat OpenSSH -cert.pub (facultatif)" };
+    private readonly CheckBox _rdpFileClipboard = new() { Content = "Fichiers bidirectionnels (FreeRDP 3)" };
     private readonly CheckBox _tunnel = new() { Content = "Activer une redirection locale SSH" };
     private readonly NumericUpDown _tunnelLocalPort = new() { Minimum = 1024, Maximum = 65535, Value = 13389 };
     private readonly TextBox _tunnelHost = new() { Text = "localhost" };
@@ -64,21 +65,21 @@ public sealed partial class MainWindow
     }
     private void ResetAdvancedProperties()
     {
-        _icon.SelectedItem = "Auto"; _certificate.Text = ""; _tunnel.IsChecked = false;
+        _icon.SelectedItem = "Auto"; _certificate.Text = ""; _tunnel.IsChecked = false; _rdpFileClipboard.IsChecked = false;
         _tunnelLocalPort.Value = 13389; _tunnelHost.Text = "localhost"; _tunnelRemotePort.Value = 3389;
         _resolution.SelectedIndex = 0; _rdpWidth.Value = 1280; _rdpHeight.Value = 720; _configurationTitle.Text = "Configuration · Nouvelle connexion";
         UpdateAdvancedProperties();
     }
     private void EditAdvancedProperties(Connection c)
     {
-        _icon.SelectedItem = c.Icon; _certificate.Text = c.CertificateFile; _tunnel.IsChecked = c.TunnelEnabled;
+        _icon.SelectedItem = c.Icon; _certificate.Text = c.CertificateFile; _tunnel.IsChecked = c.TunnelEnabled; _rdpFileClipboard.IsChecked = c.RdpFileClipboard;
         _tunnelLocalPort.Value = c.TunnelLocalPort; _tunnelHost.Text = c.TunnelRemoteHost; _tunnelRemotePort.Value = c.TunnelRemotePort;
         _resolution.SelectedIndex = c.RdpResolution switch { "fixed" => 1, "fullscreen" => 2, _ => 0 };
         _rdpWidth.Value = c.RdpWidth; _rdpHeight.Value = c.RdpHeight; _configurationTitle.Text = "Configuration · " + c.Name;
         UpdateAdvancedProperties();
     }
     private Connection ReadAdvancedProperties(Connection c) => c with {
-        Icon = _icon.SelectedItem?.ToString() ?? "Auto", CertificateFile = _certificate.Text?.Trim() ?? "",
+        Icon = _icon.SelectedItem?.ToString() ?? "Auto", CertificateFile = _certificate.Text?.Trim() ?? "", RdpFileClipboard = c.Protocol == "RDP" && c.Clipboard && _rdpFileClipboard.IsChecked == true,
         TunnelEnabled = c.Protocol == "SSH" && _tunnel.IsChecked == true, TunnelLocalPort = (int)(_tunnelLocalPort.Value ?? 0), TunnelRemoteHost = _tunnelHost.Text?.Trim() ?? "", TunnelRemotePort = (int)(_tunnelRemotePort.Value ?? 0),
         RdpResolution = _resolution.SelectedIndex switch { 1 => "fixed", 2 => "fullscreen", _ => "dynamic" }, RdpWidth = (int)(_rdpWidth.Value ?? 0), RdpHeight = (int)(_rdpHeight.Value ?? 0)
     };

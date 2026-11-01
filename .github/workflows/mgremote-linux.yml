@@ -30,14 +30,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image=$(find artifacts/linux/0.2.15 -type f -name '*.AppImage' -print -quit)
+          image=$(find artifacts/linux/0.2.16 -type f -name '*.AppImage' -print -quit)
           export APPIMAGE_EXTRACT_AND_RUN=1
           "$image" --self-test
           xvfb-run -a "$image" --smoke-ui="$GITHUB_WORKSPACE/artifacts/linux-gui.png"
           python3 Linux/Test-Serial.py "$image"
           python3 - <<'PY'
           import json,pathlib,hashlib
-          folder=next(pathlib.Path('artifacts/linux/0.2.15').iterdir())
+          folder=next(pathlib.Path('artifacts/linux/0.2.16').iterdir())
           path=folder/'manifest.json'
           data=json.loads(path.read_text(encoding='utf-8-sig'))
           image=folder/data['AppImage']
@@ -53,12 +53,13 @@ jobs:
         with:
           name: mgremote-linux-validated
           path: |
-            artifacts/linux/0.2.15/*/*.AppImage
-            artifacts/linux/0.2.15/*/*-source.zip
-            artifacts/linux/0.2.15/*/manifest.json
+            artifacts/linux/0.2.16/*/*.AppImage
+            artifacts/linux/0.2.16/*/*-source.zip
+            artifacts/linux/0.2.16/*/manifest.json
             artifacts/linux-gui.png
             artifacts/linux-gui-compact.png
             artifacts/linux-gui-export.png
             artifacts/linux-gui-key.png
             artifacts/linux-gui-profiles.png
+            artifacts/linux-gui-transfer.png
           if-no-files-found: error
