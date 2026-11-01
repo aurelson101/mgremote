@@ -14,7 +14,7 @@ public sealed partial class MainWindow
 
     private async Task ExportPortableProfile()
     {
-        if (_profileBusy || !_storeLoaded || _closing) return;
+        if (_profileBusy || !_storeLoaded || _closing || !FlushAutoSave()) return;
         _profileBusy = true; UpdateProfileActions();
         try {
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions {
@@ -65,7 +65,7 @@ public sealed partial class MainWindow
     }
     private async Task ImportPortableProfile()
     {
-        if (_profileBusy || !_storeLoaded || _closing) return;
+        if (_profileBusy || !_storeLoaded || _closing || !FlushAutoSave()) return;
         _profileBusy = true; UpdateProfileActions();
         try {
             var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Importer un profil MGRemote chiffré", AllowMultiple = false, FileTypeFilter = [PortableProfileType, FilePickerFileTypes.All] });

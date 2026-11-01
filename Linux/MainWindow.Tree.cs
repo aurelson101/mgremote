@@ -12,7 +12,7 @@ public sealed partial class MainWindow
 {
     private readonly List<string[]> _folders = [];
     private readonly Dictionary<string, TreeViewItem> _folderNodes = [];
-    private readonly string _dataPath = App.Smoke ? Path.Combine(Path.GetTempPath(), "mgremote-ui-" + Guid.NewGuid().ToString("N"), "connections.json") : Connections.DataPath;
+    private string _dataPath = App.Smoke ? Path.Combine(Path.GetTempPath(), "mgremote-ui-" + Guid.NewGuid().ToString("N"), "connections.json") : Connections.DataPath;
     private static string FolderKey(string[] path) => JsonSerializer.Serialize(path);
     private static bool InFolder(string[] candidate, string[] parent) => candidate.Length >= parent.Length && candidate.Take(parent.Length).SequenceEqual(parent);
     private void SelectTreeTarget(TreeViewItem? item) => _list.SelectedItem = item ?? _list.ItemsSource?.OfType<TreeViewItem>().FirstOrDefault();
@@ -58,11 +58,12 @@ public sealed partial class MainWindow
     }
     private void Persist(IEnumerable<Connection> connections, IEnumerable<string[]>? folders = null)
     {
-        if (!_storeLoaded) throw new IOException("Fichier existant non chargé : écriture bloquée pour préserver vos données.");
+        if (!_storeLoaded || _profileBusy) throw new IOException("Profil non chargé ou occupé : écriture bloquée pour préserver vos données.");
         _profileRevision = Connections.Save(connections, folders ?? _folders, _dataPath, _profileKey, _profileRevision);
     }
     private void NewConnectionFromTree()
     {
+        if (!FlushAutoSave()) return;
         try {
             var parent = (_list.SelectedItem as TreeViewItem)?.Tag switch { Connection c => c.FolderPath, string[] path => path, _ => _selectedFolder };
             string name = "Nouvelle connexion"; int suffix = 2;
@@ -70,11 +71,12 @@ public sealed partial class MainWindow
             var draft = new Connection { Name = name, FolderPath = parent.ToArray(), IsDraft = true };
             Persist(_connections.Append(draft)); _connections.Add(draft); _search.Text = ""; Filter();
             _list.SelectedItem = _nodes[draft]; Edit(draft); _name.Focus();
-            _status.Text = "Connexion créée. Choisissez le protocole, renseignez l’hôte puis enregistrez.";
+            _status.Text = "Connexion créée. Choisissez le protocole et renseignez l’hôte ; les modifications sont enregistrées automatiquement.";
         } catch (Exception ex) { _status.Text = ex.Message; }
     }
     private void CreateFolder(string name)
     {
+        if (!FlushAutoSave()) return;
         string[] path = [.._selectedFolder, name.Trim()]; Connections.ValidateFolderPath(path);
         if (_folderNodes.ContainsKey(FolderKey(path))) throw new ArgumentException("Ce dossier existe déjà.");
         Persist(_connections, _folders.Append(path)); _folders.Add(path); _search.Text = ""; Filter();
@@ -106,6 +108,7 @@ public sealed partial class MainWindow
     }
     private void RenameFolder(string[] original, string name)
     {
+        if (!FlushAutoSave()) return;
         string[] target = [..original[..^1], name.Trim()]; Connections.ValidateFolderPath(target);
         if (!target.SequenceEqual(original) && _folderNodes.ContainsKey(FolderKey(target))) throw new ArgumentException("Ce dossier existe déjà.");
         string[] Rewrite(string[] path) => InFolder(path, original) ? [..target, ..path.Skip(original.Length)] : path;
@@ -116,6 +119,7 @@ public sealed partial class MainWindow
     }
     private void DeleteFolder(string[] path)
     {
+        if (!FlushAutoSave()) return;
         if (path.Length == 0) return;
         if (_connections.Any(c => InFolder(c.FolderPath, path)) || _folders.Any(f => f.Length > path.Length && InFolder(f, path))) throw new InvalidOperationException("Dossier non vide : supprimez ou déplacez d’abord son contenu.");
         var next = _folders.Where(f => !f.SequenceEqual(path)).ToArray(); Persist(_connections, next);

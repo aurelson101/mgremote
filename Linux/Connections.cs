@@ -221,8 +221,8 @@ public static class Connections
         string content = JsonSerializer.Serialize(new Store(1, items, paths), new JsonSerializerOptions { WriteIndented = true });
         if (System.Text.Encoding.UTF8.GetByteCount(content) > ProfileEncryption.MaxPlaintext) throw new InvalidDataException("Profil trop volumineux.");
         if (profileKey != null) content = ProfileEncryption.Encode(content, profileKey);
-        Directory.CreateDirectory(folder);
-        if (OperatingSystem.IsLinux()) File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        if (OperatingSystem.IsLinux()) Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        else Directory.CreateDirectory(folder);
         string temporary = Path.Combine(folder, ".connections-" + Guid.NewGuid().ToString("N"));
         try {
             var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
@@ -309,7 +309,7 @@ public static class SessionLauncher
     {
         path = path.Trim();
         if (path.StartsWith("~/", StringComparison.Ordinal)) path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..]);
-        if (!Path.IsPathFullyQualified(path)) throw new IOException("Saisissez le chemin absolu de la clé privée (ou ~/.ssh/id_ed25519).");
+        if (!Path.IsPathFullyQualified(path)) throw new IOException("Saisissez un chemin absolu (ou ~/...).");
         return Path.GetFullPath(path);
     }
     internal static void ValidateIdentityFile(string path)

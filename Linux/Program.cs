@@ -49,6 +49,7 @@ public sealed class App : Application
                     await ((MainWindow)window).VerifyProfileUi();
                     await ((MainWindow)window).VerifyPortableProfileUi();
                     await ((MainWindow)window).VerifyKeySelection();
+                    await ((MainWindow)window).VerifyProfileWorkflowUi();
                     ((MainWindow)window).VerifyTabClosing();
                     await ((MainWindow)window).VerifyDesktopUi();
                     await ((MainWindow)window).VerifyEmbeddedSessions();
@@ -102,14 +103,15 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.13"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        _defaultProfilePath = _dataPath;
+        Title = "MGRemote — Linux Desktop 0.2.14"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
         MenuItem Entry(string title, Action action) { var item = new MenuItem { Header = title }; item.Click += (_, _) => action(); return item; }
         MenuItem Group(string title, params MenuItem[] items) => new() { Header = title, ItemsSource = items };
         menus.ItemsSource = new[] {
-            Group("Fichier", Entry("Nouvelle connexion", NewConnectionFromTree), Entry("Dupliquer la connexion", Duplicate), Entry("Importer mRemoteNG XML…", async () => await Import()), _importProfileItem, _exportProfileItem, Entry("Enregistrer", Save), Entry("Chiffrer / déverrouiller le profil…", async () => await ManageProfile()), _lockProfileItem, Entry("Quitter", Close)),
+            Group("Fichier", Entry("Nouvelle connexion", NewConnectionFromTree), Entry("Dupliquer la connexion", Duplicate), Entry("Importer mRemoteNG XML…", async () => await Import()), _importProfileItem, _exportProfileItem, Entry("Enregistrer", Save), Entry("Changer / gérer les profils…", async () => await SwitchProfile()), Entry("Chiffrer / déverrouiller le profil…", async () => await ManageProfile()), _lockProfileItem, Entry("Quitter", Close)),
             Group("Sessions", Entry("Connecter", () => Launch(false)), Entry("Transfert SFTP", () => Launch(true)), Entry("Ouvrir en fenêtre externe", External), Entry("Fermer la session", () => CloseSession(_tabBar.SelectedItem as SessionTab))),
             Group("Affichage", Entry("Accueil", () => _tabBar.SelectedItem = _tabs.FirstOrDefault())),
             Group("Outils", Entry("Console série", () => { New(); _protocol.SelectedIndex = 2; _host.Focus(); }), Entry("Choisir une clé SSH…", async () => await ChooseKey())),
@@ -133,7 +135,29 @@ public sealed partial class MainWindow : Window
         treePanel.Children.Add(DockTitle("Connexions"));
         _search.Margin = new Thickness(5); _search.MinHeight = 26; _search.FontSize = 12; Grid.SetRow(_search, 1); treePanel.Children.Add(_search);
         Grid.SetRow(_list, 2); treePanel.Children.Add(_list); sidebar.Children.Add(treePanel);
-        _list.SelectionChanged += (_, _) => { if (_rebuildingTree) return; if (_list.SelectedItem is TreeViewItem item) { if (item.Tag is Connection connection) { _selectedFolder = connection.FolderPath; Edit(connection); } else if (item.Tag is string[] path) { _selectedFolder = path; _editing = null; _name.Text = _host.Text = ""; _folder.Text = string.Join(" > ", path); } } };
+        _list.SelectionChanged += (_, _) => {
+            if (_rebuildingTree) return;
+            var item = _list.SelectedItem as TreeViewItem;
+            var previous = _editing;
+            if (!PrepareEditorChange()) return;
+            if (item != null) {
+                if (item.Tag is Connection connection) {
+                    if (ReferenceEquals(connection, previous)) connection = _editing ?? connection;
+                    _rebuildingTree = true;
+                    try { if (_nodes.TryGetValue(connection, out var live)) _list.SelectedItem = live; }
+                    finally { _rebuildingTree = false; }
+                    Edit(connection);
+                }
+                else if (item.Tag is string[] path) {
+                    _rebuildingTree = true;
+                    try { if (_folderNodes.TryGetValue(FolderKey(path), out var live)) _list.SelectedItem = live; }
+                    finally { _rebuildingTree = false; }
+                    _hydratingEditor = true;
+                    try { _selectedFolder = path; _editing = null; _name.Text = _host.Text = ""; _folder.Text = string.Join(" > ", path); }
+                    finally { _hydratingEditor = false; }
+                }
+            }
+        };
         _list.DoubleTapped += (_, _) => { if (_list.SelectedItem is TreeViewItem { Tag: Connection }) Launch(false); };
         InstallTreeMenu();
         _search.TextChanged += (_, _) => RequestFilter();
@@ -188,7 +212,7 @@ public sealed partial class MainWindow : Window
         else { _storeLoaded = false; Opened += async (_, _) => await InitializeProfile(); }
         foreach (var input in new[] { _description, _name, _host, _user, _domain, _key, _search, _folder, _jump, _sharePath }) { input.Background = Brushes.White; input.Foreground = Foreground; input.FontSize = 12; }
         _list.Background = Brushes.White; _list.Foreground = Foreground; Filter();
-        InstallShortcuts(); New(); UpdateProfileActions();
+        InstallShortcuts(); New(); UpdateProfileActions(); InstallAutoSave();
     }
     private static Button Button(string title, Action action)
     {
@@ -202,7 +226,13 @@ public sealed partial class MainWindow : Window
         control.HorizontalAlignment = HorizontalAlignment.Stretch; control.VerticalAlignment = VerticalAlignment.Stretch; Grid.SetColumn(control, 1); row.Children.Add(control);
         panel.Children.Add(new Border { BorderBrush = Brush.Parse("#e7eaee"), BorderThickness = new Thickness(0, 0, 0, 1), Child = row });
     }
-    private void New() { _encryptedPassword = ""; _gateway.Text = ""; _gatewayMode.SelectedIndex = 0; _description.Text = ""; _colors.SelectedItem = 32; _audio.SelectedIndex = 2; _console.IsChecked = false; _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = _share.IsChecked = false; _jump.Text = _sharePath.Text = ""; _folder.Text = string.Join(" > ", _selectedFolder); _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; ResetAdvancedProperties(); UpdateProtocol(); }
+    private void New()
+    {
+        if (!PrepareEditorChange()) return;
+        _hydratingEditor = true;
+        try { _encryptedPassword = ""; _gateway.Text = ""; _gatewayMode.SelectedIndex = 0; _description.Text = ""; _colors.SelectedItem = 32; _audio.SelectedIndex = 2; _console.IsChecked = false; _editing = null; _list.SelectedItem = null; _name.Text = "Nouvelle connexion"; _host.Text = _user.Text = _domain.Text = _key.Text = ""; _protocol.SelectedIndex = 0; _port.Value = 22; _clipboard.IsChecked = _multi.IsChecked = _share.IsChecked = false; _jump.Text = _sharePath.Text = ""; _folder.Text = string.Join(" > ", _selectedFolder); _baud.Value = 9600; _bits.Value = 8; _stop.Value = 1; _parity.SelectedIndex = _flow.SelectedIndex = 0; ResetAdvancedProperties(); UpdateProtocol(); }
+        finally { _hydratingEditor = false; }
+    }
     private void UpdateProtocol()
     {
         bool ssh = _protocol.SelectedIndex == 0, rdp = _protocol.SelectedIndex == 1, serial = _protocol.SelectedIndex == 2;
@@ -215,12 +245,16 @@ public sealed partial class MainWindow : Window
     private void Filter() => RebuildTree();
     private void Edit(Connection c)
     {
+        if (!PrepareEditorChange()) return;
+        _hydratingEditor = true;
+        try {
         _encryptedPassword = c.EncryptedPassword; _gateway.Text = c.GatewayHost; _gatewayMode.SelectedItem = c.GatewayMode;
         _description.Text = c.Description; _colors.SelectedItem = c.ColorDepth; _audio.SelectedIndex = c.AudioMode; _console.IsChecked = c.ConsoleSession;
         _editing = c; _selectedFolder = c.FolderPath; _folder.Text = string.Join(" > ", c.FolderPath); _name.Text = c.Name; _host.Text = c.Host; _protocol.SelectedIndex = c.Protocol == "Serial" ? 2 : c.Protocol == "SSH" ? 0 : 1;
         _port.Value = c.Port; _user.Text = c.User; _domain.Text = c.Domain; _key.Text = c.Identity; _clipboard.IsChecked = c.Clipboard; _multi.IsChecked = c.MultiMonitor;
         _baud.Value = c.BaudRate; _bits.Value = c.DataBits; _stop.Value = c.StopBits; _parity.SelectedItem = c.Parity; _flow.SelectedItem = c.FlowControl;
         _jump.Text = c.JumpHost; _share.IsChecked = c.RdpShareEnabled; _sharePath.Text = c.RdpSharePath; EditAdvancedProperties(c);
+        } finally { _hydratingEditor = false; }
     }
     private Connection Read() => ReadAdvancedProperties(new Connection { IsDraft = _editing?.IsDraft == true && string.IsNullOrWhiteSpace(_host.Text), EncryptedPassword = _encryptedPassword, GatewayHost = _gateway.Text?.Trim() ?? "", GatewayMode = _gatewayMode.SelectedItem?.ToString() ?? "direct", Description = _description.Text ?? "", ColorDepth = _colors.SelectedItem is int depth ? depth : 32, AudioMode = _audio.SelectedIndex, ConsoleSession = _console.IsChecked == true, Name = _name.Text?.Trim() ?? "", Host = _host.Text?.Trim() ?? "", Protocol = _protocol.SelectedItem?.ToString() ?? "", Port = (int)(_port.Value ?? 0), User = _user.Text?.Trim() ?? "", Domain = _domain.Text?.Trim() ?? "", Identity = _key.Text?.Trim() ?? "", Clipboard = _clipboard.IsChecked == true, MultiMonitor = _multi.IsChecked == true, BaudRate = (int)(_baud.Value ?? 0), DataBits = (int)(_bits.Value ?? 0), StopBits = (int)(_stop.Value ?? 0), Parity = _parity.SelectedItem?.ToString() ?? "", FlowControl = _flow.SelectedItem?.ToString() ?? "", FolderPath = ReadFolderPath(), JumpHost = _jump.Text?.Trim() ?? "", RdpShareEnabled = _share.IsChecked == true, RdpSharePath = _sharePath.Text?.Trim() ?? "" });
     internal void VerifyProtocolPortEditing()
@@ -248,17 +282,24 @@ public sealed partial class MainWindow : Window
         _storeLoaded = true; _status.Text = previousStatus;
         New();
     }
-    private void Save()
+    private void Save() => SaveEditor();
+    private bool SaveEditor(bool automatic = false)
     {
+        _savingEditor = true;
         try {
             if (!_storeLoaded) throw new IOException("Fichier existant non chargé : corrigez-le puis relancez MGRemote. Enregistrement bloqué pour préserver vos données.");
+            if (_profileBusy) throw new IOException("Une opération de profil est en cours. Attendez sa fin avant d’enregistrer.");
             var item = Read(); Connections.Validate(item, allowDraft: true);
             var next = _connections.ToList(); int index = _editing == null ? -1 : next.FindIndex(c => ReferenceEquals(c, _editing));
             if (index < 0) next.Add(item); else next[index] = item;
             var folders = _folders.Concat(Enumerable.Range(1, item.FolderPath.Length).Select(length => item.FolderPath.Take(length).ToArray())).DistinctBy(FolderKey).ToArray();
             Persist(next, folders); _folders.Clear(); _folders.AddRange(folders); _connections.Clear(); foreach (var c in next) _connections.Add(c);
-            RememberTreeSelection(item); Filter(); if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); _status.Text = "Connexion enregistrée ; les secrets importés restent chiffrés.";
-        } catch (Exception ex) { _status.Text = ex.Message; }
+            CancelAutoSave(); _editing = item; RememberTreeSelection(item); Filter();
+            if (!automatic) { if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); }
+            _status.Text = automatic ? "Modifications enregistrées automatiquement." : "Connexion enregistrée ; les secrets importés restent chiffrés.";
+            return true;
+        } catch (Exception ex) { _status.Text = (automatic ? "Non enregistré : " : "") + ex.Message; return false; }
+        finally { _savingEditor = false; }
     }
     private Window? _keyPicker;
     private async Task ChooseKey(Action<Window>? shown = null)
@@ -286,6 +327,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(browse); panel.Children.Add(error);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(18, 0, 18, 18) };
         var cancel = Button("Annuler", () => dialog.Close()); cancel.IsCancel = true; actions.Children.Add(cancel);
+        actions.Children.Add(Button("Sans clé", () => { _key.Text = _certificate.Text = ""; _status.Text = "SSH sans clé imposée : mot de passe, agent ou configuration OpenSSH."; dialog.Close(); }));
         var use = new Button { Content = "Utiliser cette clé", IsDefault = true };
         async Task Validate()
         {
@@ -294,7 +336,7 @@ public sealed partial class MainWindow : Window
                 string selected = SessionLauncher.IdentityPath(path.Text ?? "");
                 await Task.Run(() => SessionLauncher.ValidateIdentityFile(selected));
                 if (closed || _closing || !_storeLoaded) return;
-                _key.Text = selected; _status.Text = "Clé privée sélectionnée. Enregistrez la connexion pour conserver ce chemin."; dialog.Close();
+                _key.Text = selected; _status.Text = "Clé privée sélectionnée ; sauvegarde automatique après la modification."; dialog.Close();
             } catch (Exception ex) { if (!closed) error.Text = ex.Message; }
             finally { if (!closed) use.IsEnabled = browse.IsEnabled = path.IsEnabled = true; }
         }

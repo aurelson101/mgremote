@@ -12,9 +12,10 @@ public sealed partial class MainWindow
     }
     private void Duplicate()
     {
+        if (!FlushAutoSave()) return;
         if (_editing == null) { _status.Text = "Sélectionnez une connexion à dupliquer."; return; }
         var source = _editing; Edit(source); _editing = null; _list.SelectedItem = null;
-        _name.Text = source.Name + " (copie)"; _name.Focus(); _status.Text = "Copie prête ; cliquez sur Enregistrer pour l’ajouter.";
+        _name.Text = source.Name + " (copie)"; _name.Focus(); _status.Text = "Copie prête ; les modifications seront enregistrées automatiquement.";
     }
     private async Task ChooseRdpFolder()
     {
@@ -143,6 +144,7 @@ public sealed partial class MainWindow
     }
     private async Task Delete()
     {
+        if (!FlushAutoSave()) return;
         if (_editing == null || !_storeLoaded) return;
         var target = _editing;
         var dialog = new Window { Title = "Supprimer la connexion", Width = 430, Height = 180, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };

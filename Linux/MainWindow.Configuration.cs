@@ -30,7 +30,8 @@ public sealed partial class MainWindow
     private Control BuildSshProperties()
     {
         var fields = new StackPanel { Spacing = 0 };
-        Add(fields, "Clé privée", BrowseField(_key, "Choisir une clé privée SSH", async () => await ChooseKey()));
+        _key.PlaceholderText = "Facultative : mot de passe ou agent SSH";
+        Add(fields, "Clé privée (facultative)", BrowseField(_key, "Choisir une clé privée SSH", async () => await ChooseKey()));
         Add(fields, "Certificat SSH", BrowseField(_certificate, "Choisir un certificat SSH", async () => {
             try {
                 var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Certificat public OpenSSH", AllowMultiple = false });
