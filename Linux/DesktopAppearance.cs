@@ -67,7 +67,7 @@ internal static class DesktopAppearance
                 new Setter(ContentPresenter.BorderBrushProperty, Divider));
         }
         Style(s => s.OfType<Menu>(),
-            new Setter(TemplatedControl.BackgroundProperty, Chrome),
+            new Setter(TemplatedControl.BackgroundProperty, Brush.Parse("#eeeef2")),
             new Setter(TemplatedControl.ForegroundProperty, Text),
             new Setter(Layoutable.MinHeightProperty, 30d));
         Style(s => s.OfType<MenuItem>(),
@@ -80,8 +80,8 @@ internal static class DesktopAppearance
             new Setter(Layoutable.MinHeightProperty, 34d));
         Style(s => s.OfType<TabStripItem>().Class(":selected"),
             new Setter(TemplatedControl.BackgroundProperty, Surface),
-            new Setter(TemplatedControl.BorderBrushProperty, Divider),
-            new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(1, 0, 1, 0)));
+            new Setter(TemplatedControl.BorderBrushProperty, Brush.Parse("#007acc")),
+            new Setter(TemplatedControl.BorderThicknessProperty, new Thickness(0, 2, 0, 0)));
         foreach (string state in new[] { "", ":checked", ":pointerover", ":pressed" }) {
             var fill = Brush.Parse(state is ":pointerover" or ":pressed" ? "#dfe5eb" : "#e9edf1");
             Style(s => {

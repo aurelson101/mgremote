@@ -12,11 +12,21 @@ namespace MGRemote.Linux;
 public sealed partial class MainWindow
 {
     private static readonly IBrush PanelLine = Brush.Parse("#d6dbe1");
-    private static Control DockTitle(string title)
-        => new Border {
-            Background = Brush.Parse("#edf0f3"), BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 0, 1),
-            Child = new TextBlock { Text = title, FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(10, 7) }
-        };
+    internal static readonly IBrush Workspace = Brush.Parse("#eeeef2");
+    private static readonly IBrush ActiveCaption = Brush.Parse("#007acc"), InactiveCaption = Brush.Parse("#cfd6e5");
+    // Dock caption in the Windows style: blue when active, pale slate otherwise, with pin/close glyphs.
+    private static Border DockCaption(Control title, bool active)
+    {
+        var ink = active ? Brushes.White : Brush.Parse("#2b3a55");
+        var glyphs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        glyphs.Children.Add(new Avalonia.Controls.Shapes.Path { Data = Geometry.Parse("M3 1H8 M4 1V5L2 7H9L7 5V1 M5.5 7V11"), Stroke = ink, StrokeThickness = 1.1, Width = 11, Height = 12 });
+        glyphs.Children.Add(new Avalonia.Controls.Shapes.Path { Data = Geometry.Parse("M1 1L9 9 M9 1L1 9"), Stroke = ink, StrokeThickness = 1.3, Width = 10, Height = 10 });
+        var row = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(glyphs, Dock.Right); row.Children.Add(glyphs); row.Children.Add(title);
+        return new Border { Background = active ? ActiveCaption : InactiveCaption, Child = row, MinHeight = 26 };
+    }
+    private static Control DockTitle(string title, bool active = false)
+        => DockCaption(new TextBlock { Text = title, FontSize = 13, Foreground = active ? Brushes.White : Brush.Parse("#2b3a55"), Margin = new Thickness(8, 4), VerticalAlignment = VerticalAlignment.Center }, active);
     private static Image ToolbarGlyph(string path, int size = 16)
         => new() { Width = size, Height = size, Source = new DrawingImage { Drawing = new GeometryDrawing {
             Geometry = Geometry.Parse(path), Pen = new Pen(Brush.Parse("#65717e"), 1.4)

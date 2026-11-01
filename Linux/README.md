@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.18 — development preview
+# MGRemote Linux Desktop 0.2.19 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -131,7 +131,7 @@ SSH terminals now copy a left-button text selection to both PRIMARY and CLIPBOAR
 
 SFTP fields now expose right-click text and file/folder commands. Copy local files or the latest received directory to the system clipboard, then paste through the local file manager. The received directory can contain partial files if the transfer was interrupted. These clipboard actions do not start transfers.
 
-## Development update 0.2.18: desktop polish and session recovery
+## Development update 0.2.19: desktop polish and session recovery
 
 The desktop now uses a consistent readable font, wider property labels, a useful home screen, a clearer Connect action and a fixed status bar with the full message in a tooltip. Transfer commands stay outside the scrolling SFTP form. Initial embedded-terminal font size follows the window DPI; main/compact captures preserve the rendering scale.
 

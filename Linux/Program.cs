@@ -109,9 +109,9 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         _defaultProfilePath = _dataPath;
-        Title = "MGRemote — Linux Desktop 0.2.18"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 13;
-        Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
+        Title = "MGRemote — Linux Desktop 0.2.19"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 13;
+        Background = Workspace; Foreground = DesktopAppearance.Text;
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Workspace };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
         MenuItem Entry(string title, Action action) { var item = new MenuItem { Header = title }; item.Click += (_, _) => action(); return item; }
         MenuItem Group(string title, params MenuItem[] items) => new() { Header = title, ItemsSource = items };
@@ -136,9 +136,15 @@ public sealed partial class MainWindow : Window
         var body = new Grid { ColumnDefinitions = new ColumnDefinitions("360,4,*") }; Grid.SetRow(body, 2);
         body.ColumnDefinitions[0].MinWidth = 320; body.ColumnDefinitions[2].MinWidth = 420;
         var sidebar = new Grid { RowDefinitions = new RowDefinitions("2*,4,3*") };
-        var treePanel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Background = Brushes.White };
-        treePanel.Children.Add(DockTitle("Connexions"));
-        _search.Margin = new Thickness(8); _search.MinHeight = 30; _search.FontSize = 13; Grid.SetRow(_search, 1); treePanel.Children.Add(_search);
+        var treePanel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Brushes.White };
+        treePanel.Children.Add(DockTitle("Connexions", true));
+        var treeStrip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(3, 1), Background = Brush.Parse("#f6f6f8") }; treeStrip.Classes.Add("toolstrip");
+        void Strip(string tip, string path, Action action) { var b = Button("", action); b.Content = ToolbarGlyph(path); b.MinWidth = 28; b.Padding = new Thickness(5, 3); ToolTip.SetTip(b, tip); Avalonia.Automation.AutomationProperties.SetName(b, tip); treeStrip.Children.Add(b); }
+        Strip("Nouvelle connexion", "M2 2H13V18H2Z M6 7H17 M11 2V12", NewConnectionFromTree); Strip("Nouveau dossier", "M2 5H8L10 7H20V18H2Z", async () => await CreateFolderDialog());
+        void SetExpanded(bool open) { foreach (var node in Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(_list).OfType<TreeViewItem>().ToArray()) node.IsExpanded = open; }
+        Strip("Tout développer", "M3 10H17 M10 3V17", () => SetExpanded(true)); Strip("Tout réduire", "M3 10H17", () => SetExpanded(false));
+        Grid.SetRow(treeStrip, 1); treePanel.Children.Add(treeStrip);
+        _search.Margin = new Thickness(0); _search.MinHeight = 26; _search.FontSize = 13; _search.BorderThickness = new Thickness(0, 1, 0, 0); _search.CornerRadius = new CornerRadius(0); Grid.SetRow(_search, 3); treePanel.Children.Add(_search);
         Grid.SetRow(_list, 2); treePanel.Children.Add(_list); sidebar.Children.Add(treePanel);
         _list.SelectionChanged += (_, _) => {
             if (_rebuildingTree) return;
@@ -169,7 +175,7 @@ public sealed partial class MainWindow : Window
         var horizontal = new GridSplitter { Height = 4, Background = PanelLine, HorizontalAlignment = HorizontalAlignment.Stretch }; Grid.SetRow(horizontal, 1); sidebar.Children.Add(horizontal);
         var editor = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Brushes.White };
         _profileEditor = editor;
-        editor.Classes.Add("properties"); editor.Children.Add(new Border { Background = DesktopAppearance.Chrome, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 0, 0, 1), Child = _configurationTitle });
+        editor.Classes.Add("properties"); _configurationTitle.Foreground = Brush.Parse("#2b3a55"); _configurationTitle.FontWeight = FontWeight.Normal; editor.Children.Add(DockCaption(_configurationTitle, false));
         var propertyToolbar = PropertyToolbar(); Grid.SetRow(propertyToolbar, 1); editor.Children.Add(propertyToolbar);
         var fields = new StackPanel { Spacing = 0 };
         var displayFields = new StackPanel { Spacing = 0 };
@@ -199,7 +205,7 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(editActions, 3); editor.Children.Add(editActions); Grid.SetRow(editor, 2); sidebar.Children.Add(editor);
         body.Children.Add(sidebar);
         var vertical = new GridSplitter { Width = 4, Background = PanelLine, VerticalAlignment = VerticalAlignment.Stretch }; Grid.SetColumn(vertical, 1); body.Children.Add(vertical);
-        var sessions = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Background = Brush.Parse("#f7f8fa") };
+        var sessions = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Background = Workspace };
         _tabBar.ItemsSource = _tabs;
         _tabBar.ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<SessionTab>((tab, _) => {
             var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -214,7 +220,7 @@ public sealed partial class MainWindow : Window
         var statusTip = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 560 };
         statusTip.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(TextBlock.Text)) { Source = _status }); ToolTip.SetTip(_status, statusTip);
         _status.Margin = new Thickness(10, 0); _status.FontSize = 12;
-        var statusBar = new Border { Height = 32, Background = DesktopAppearance.Chrome, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 1, 0, 0), Child = _status };
+        var statusBar = new Border { Background = Brushes.White, BorderBrush = PanelLine, BorderThickness = new Thickness(0, 1, 0, 0), Child = new StackPanel { Children = { DockTitle("Notifications"), new Border { Height = 28, Child = _status } } } };
         Grid.SetRow(statusBar, 3); root.Children.Add(statusBar); Content = root;
         Closed += (_, _) => { _closing = true; ForgetTreeState(); _profileKey?.Dispose(); foreach (var tab in _tabs.ToArray()) { tab.Host?.Dispose(); tab.Credentials?.Dispose(); (tab.Body as IDisposable)?.Dispose(); } CleanupSmokeStore(); };
         _protocol.SelectionChanged += (_, _) => {
