@@ -330,8 +330,8 @@ public static class SessionLauncher
     {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux.");
         if (!Path.IsPathFullyQualified(path)) throw new IOException("Chemin absolu requis pour le fichier SSH.");
-        // Open each component without following links, then inspect and read the same descriptor.
-        using var stream = ProfileEncryption.OpenLocalRead(path);
+        // SSH accepts linked keys/folders; inspect permissions and bounded content on the actual target.
+        using var stream = ProfileEncryption.OpenLocalRead(path, allowLinks: true);
         var forbidden = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
         if (privateKey) forbidden |= UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
         if ((File.GetUnixFileMode(stream.SafeFileHandle) & forbidden) != 0)

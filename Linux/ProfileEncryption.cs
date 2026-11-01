@@ -28,7 +28,8 @@ internal static class ProfileEncryption
     internal const int MaxPlaintext = 16 * 1024 * 1024;
     internal const int MaxFile = 24 * 1024 * 1024;
     private const string Format = "MGRemote-profile-v1";
-    private const int ReadFlags = 0x20000 | 0x80000 | 0x800; // O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK (Linux).
+    private const int NoFollow = 0x20000;
+    private const int ReadFlags = NoFollow | 0x80000 | 0x800; // O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK (Linux).
     private const int DirectoryFlags = ReadFlags | 0x10000; // O_DIRECTORY.
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     private static extern int Open(string path, int flags);
@@ -57,18 +58,20 @@ internal static class ProfileEncryption
         if (error == 2) throw new FileNotFoundException("Fichier introuvable.", file);
         throw new IOException("Ouverture sûre du fichier refusée (code " + error + ").");
     }
-    internal static FileStream OpenLocalRead(string file)
+    internal static FileStream OpenLocalRead(string file, bool allowLinks = false)
     {
         string full = Path.GetFullPath(file);
         if (!OperatingSystem.IsLinux()) { RejectLinkedPath(full); return new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read); }
-        // Pin each parent directory, and refuse links at every open rather than following a checked path later.
-        SafeFileHandle directory = CheckedHandle(Open("/", DirectoryFlags), full);
+        // Profiles refuse links; SSH files may follow them. Checks/read use the opened target descriptor.
+        int readFlags = allowLinks ? ReadFlags & ~NoFollow : ReadFlags;
+        int directoryFlags = allowLinks ? DirectoryFlags & ~NoFollow : DirectoryFlags;
+        SafeFileHandle directory = CheckedHandle(Open("/", directoryFlags), full);
         try {
             foreach (string component in Path.GetDirectoryName(full)!.Split('/', StringSplitOptions.RemoveEmptyEntries)) {
-                var next = CheckedHandle(OpenAt(directory.DangerousGetHandle().ToInt32(), component, DirectoryFlags), full);
+                var next = CheckedHandle(OpenAt(directory.DangerousGetHandle().ToInt32(), component, directoryFlags), full);
                 directory.Dispose(); directory = next;
             }
-            var handle = CheckedHandle(OpenAt(directory.DangerousGetHandle().ToInt32(), Path.GetFileName(full), ReadFlags), full);
+            var handle = CheckedHandle(OpenAt(directory.DangerousGetHandle().ToInt32(), Path.GetFileName(full), readFlags), full);
             try { return new FileStream(handle, FileAccess.Read); } catch { handle.Dispose(); throw; }
         } finally { directory.Dispose(); }
     }

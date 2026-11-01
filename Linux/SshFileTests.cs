@@ -25,18 +25,34 @@ internal static class SshFileTests
             Write(pem); File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
             Reject(() => SessionLauncher.ValidateIdentityFile(file)); Write(pem);
             string link = Path.Combine(directory, "link"); File.CreateSymbolicLink(link, file);
-            Reject(() => SessionLauncher.ValidateIdentityFile(link));
+            SessionLauncher.ValidateIdentityFile(link); count++;
             string parent = Path.Combine(directory, "linked-parent"); Directory.CreateSymbolicLink(parent, directory);
-            Reject(() => SessionLauncher.ValidateIdentityFile(Path.Combine(parent, "fixture.pem")));
+            string throughParent = Path.Combine(parent, "fixture.pem");
+            SessionLauncher.ValidateIdentityFile(throughParent); count++;
+            string relative = Path.Combine(directory, "relative-link"); File.CreateSymbolicLink(relative, "fixture.pem");
+            SessionLauncher.ValidateIdentityFile(relative); count++;
+            Reject(() => ProfileEncryption.ReadProfileText(link));
+            Reject(() => ProfileEncryption.ReadProfileText(throughParent));
+            string broken = Path.Combine(directory, "broken"); File.CreateSymbolicLink(broken, "missing-key");
+            Reject(() => SessionLauncher.ValidateIdentityFile(broken));
+            string loop = Path.Combine(directory, "loop"); File.CreateSymbolicLink(loop, "loop");
+            Reject(() => SessionLauncher.ValidateIdentityFile(loop));
+            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead);
+            Reject(() => SessionLauncher.ValidateIdentityFile(link));
+            Reject(() => SessionLauncher.ValidateIdentityFile(throughParent));
+            Write("-----BEGIN OPENSSH PRIVATE KEY-----\ntruncated");
+            Reject(() => SessionLauncher.ValidateIdentityFile(link));
             var connection = new Connection { Host = "fixture.example.invalid", CertificateFile = file };
             Write("ssh-ed25519-cert-v01@openssh.com AAAA fixture"); SessionLauncher.ValidateIdentity(connection); count++;
             Write(new string('x', 65537)); Reject(() => SessionLauncher.ValidateIdentity(connection));
             Write("ssh-ed25519-cert-v01@openssh.com AAAA fixture");
+            SessionLauncher.ValidateIdentity(connection with { CertificateFile = link }); count++;
+            SessionLauncher.ValidateIdentity(connection with { CertificateFile = throughParent }); count++;
             File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherWrite);
             Reject(() => SessionLauncher.ValidateIdentity(connection));
             Reject(() => SessionLauncher.ValidateIdentity(connection with { CertificateFile = link }));
             Reject(() => SessionLauncher.ValidateIdentity(connection with { CertificateFile = Path.Combine(parent, "fixture.pem") }));
-            Console.WriteLine($"PASS: {count} bounded SSH key/certificate checks, complete PEM armor, encrypted formats, permissions, linked files/directories; generated fixtures only.");
+            Console.WriteLine($"PASS: {count} bounded SSH key/certificate checks, linked keys/folders accepted, unsafe targets/broken links/loops rejected, profiles still reject links; generated fixtures only.");
         } finally { Directory.Delete(directory, recursive: true); }
     }
 }

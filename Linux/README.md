@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.12 — development preview
+# MGRemote Linux Desktop 0.2.13 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -102,3 +102,7 @@ The AppImage includes xterm and its terminal-specific libraries, built for Ubunt
 SSH keys and certificates are read through a descriptor opened without following symbolic links in the file or parent directories. Permissions are checked on that descriptor and reads are bounded even if a file grows. Private keys require complete PEM armor with valid base64; encrypted PKCS#8, OpenSSH and legacy encrypted PEM armor remain supported. This validates the container; OpenSSH validates and decrypts the actual key when connecting.
 
 Key validation runs in the background, can be canceled without changing the connection, and repeated clicks reuse the existing dialog. Actions remain visible in a compact dialog, with Enter/Escape support and an accessible path label. Embedded clients that exit before displaying a window or fail to display within ten seconds now show an error pane. Startup polling uses a monotonic clock and reduces its frequency once the client is ready.
+
+## Development update 0.2.13: linked SSH keys and folders
+
+SSH key and certificate paths may contain symbolic links. Permissions and bounded content are checked on the actual opened target, including paths through linked directories. Broken links, loops, invalid key containers and unsafe target permissions are rejected. Selected paths are preserved; no key is copied or modified. Profile files still refuse symbolic links. This fixes the overly strict SSH link restriction introduced in 0.2.12.
