@@ -24,6 +24,18 @@ internal static class SshFileTests
             }
             Write(pem); File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
             Reject(() => SessionLauncher.ValidateIdentityFile(file)); Write(pem);
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string shorthand = "~/" + Path.GetRelativePath(home, file);
+            SessionLauncher.ValidateIdentity(new Connection { Host = "fixture.example.invalid", Identity = shorthand }); count++;
+            foreach (bool sftp in new[] { false, true }) {
+                var args = SessionLauncher.Arguments(new Connection { Host = "fixture.example.invalid", Identity = "~/.ssh/ia", CertificateFile = "~/.ssh/ia-cert.pub" }, sftp);
+                if (args[args.IndexOf("-i") + 1] != Path.Combine(home, ".ssh", "ia") || !args.Contains("CertificateFile=\"" + Path.Combine(home, ".ssh", "ia-cert.pub") + "\"")) throw new Exception("Home shorthand reached the SSH/SFTP command without expansion.");
+                count++;
+            }
+            var transfer = FileTransfer.Arguments(new Connection { Host = "fixture.example.invalid", Identity = "~/.ssh/ia" }, Path.Combine(directory, "upload"), "/remote/file", false, false);
+            if (transfer[transfer.IndexOf("-i") + 1] != Path.Combine(home, ".ssh", "ia")) throw new Exception("Home shorthand reached file transfer without expansion.");
+            count++;
+            Reject(() => SessionLauncher.ValidateIdentityFile("relative-key"));
             string link = Path.Combine(directory, "link"); File.CreateSymbolicLink(link, file);
             SessionLauncher.ValidateIdentityFile(link); count++;
             string parent = Path.Combine(directory, "linked-parent"); Directory.CreateSymbolicLink(parent, directory);
@@ -44,6 +56,7 @@ internal static class SshFileTests
             Reject(() => SessionLauncher.ValidateIdentityFile(link));
             var connection = new Connection { Host = "fixture.example.invalid", CertificateFile = file };
             Write("ssh-ed25519-cert-v01@openssh.com AAAA fixture"); SessionLauncher.ValidateIdentity(connection); count++;
+            SessionLauncher.ValidateIdentity(connection with { CertificateFile = shorthand }); count++;
             Write(new string('x', 65537)); Reject(() => SessionLauncher.ValidateIdentity(connection));
             Write("ssh-ed25519-cert-v01@openssh.com AAAA fixture");
             SessionLauncher.ValidateIdentity(connection with { CertificateFile = link }); count++;

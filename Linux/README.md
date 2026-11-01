@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.14 — development preview
+# MGRemote Linux Desktop 0.2.15 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -114,3 +114,7 @@ SSH keys remain optional: leave the field empty or use “Sans clé” in the ke
 Valid connection edits are saved automatically after a short pause and before changing the selection or closing. The existing encryption and stale-write guards are preserved. Invalid edits display “Non enregistré” and block selection/closing until corrected; changing profiles offers an explicit discard choice. “Enregistrer” remains available for an immediate save.
 
 At startup, the last successfully opened profile is preselected (only its local path is remembered). Choose a local profile, create an independent profile, restore a JSON/.mgremote/.bak file into a new profile, or remove a profile through confirmation. Removal renames the file to a recoverable .bak archive; restoring never overwrites another profile. A forgotten encryption phrase cannot be recovered, and encrypted backups retain their original phrase. “Fichier → Changer / gérer les profils” saves pending valid changes and stops managed sessions before switching. New profiles are stored beneath the application data directory in profiles/<name>-<unique-id>/connections.json. Existing parent-directory permissions are preserved when opening an external profile.
+
+## Development update 0.2.15: directly entered SSH home paths
+
+Paths such as `~/.ssh/ia` are expanded to the current user’s home directory during validation and SSH/SFTP command construction, including certificate paths. Previously only the file-selection dialog expanded `~/`. Stored profile paths are preserved, and no shell expansion is used.

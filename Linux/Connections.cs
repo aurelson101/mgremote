@@ -275,8 +275,8 @@ public static class SessionLauncher
         };
         if (!sftp) ssh.Add("-tt");
         ssh.Add(sftp ? "-P" : "-p"); ssh.Add(c.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        if (c.Identity.Length > 0) { ssh.AddRange(["-i", c.Identity, "-o", "IdentitiesOnly=yes"]); }
-        if (c.CertificateFile.Length > 0) ssh.AddRange(["-o", "CertificateFile=\"" + c.CertificateFile + "\""]);
+        if (c.Identity.Length > 0) { ssh.AddRange(["-i", IdentityPath(c.Identity), "-o", "IdentitiesOnly=yes"]); }
+        if (c.CertificateFile.Length > 0) ssh.AddRange(["-o", "CertificateFile=\"" + IdentityPath(c.CertificateFile) + "\""]);
         if (c.JumpHost.Length > 0) ssh.AddRange(["-J", c.JumpHost]);
         if (sftp) ssh.AddRange(["-o", "ClearAllForwardings=yes"]);
         else if (c.TunnelEnabled) {
@@ -329,7 +329,7 @@ public static class SessionLauncher
     private static string ReadSshFile(string path, int maximumBytes, bool privateKey)
     {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux.");
-        if (!Path.IsPathFullyQualified(path)) throw new IOException("Chemin absolu requis pour le fichier SSH.");
+        path = IdentityPath(path);
         // SSH accepts linked keys/folders; inspect permissions and bounded content on the actual target.
         using var stream = ProfileEncryption.OpenLocalRead(path, allowLinks: true);
         var forbidden = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
