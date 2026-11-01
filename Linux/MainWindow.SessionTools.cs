@@ -34,9 +34,9 @@ public sealed partial class MainWindow
                 try { RequireLoadedProfile(); AddSession(new SessionTab("SFTP · " + connection.Name, new FileTransferPane(connection, () => UnlockConnection(connection)))); }
                 catch (Exception ex) { _status.Text = ex.Message; }
             }));
-            tools.Children.Add(new TextBlock { Text = "Texte : Ctrl+Maj+C / Ctrl+Maj+V · Fichiers et dossiers : SFTP dans les deux sens", Margin = new Thickness(10, 4), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+            tools.Children.Add(new TextBlock { Text = "Souris : sélectionner pour copier · clic droit pour coller · Maj si l’application capture la souris · Fichiers : SFTP", Margin = new Thickness(10, 4), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         } else if (connection.Protocol == "RDP") {
-            tools.Children.Add(new TextBlock { Text = connection.Clipboard ? "Copier/coller : Ctrl+C / Ctrl+V" + (connection.RdpFileClipboard ? " · Fichiers bidirectionnels activés" : " · Dossiers : utilisez le partage local") : "Presse-papiers RDP désactivé pour cette connexion.", Margin = new Thickness(4), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+            tools.Children.Add(new TextBlock { Text = connection.Clipboard ? "Clic droit → Copier / Coller dans les applications du bureau distant" + (connection.RdpFileClipboard ? " · Fichiers bidirectionnels activés" : " · Dossiers : utilisez le partage local") : "Presse-papiers RDP désactivé pour cette connexion.", Margin = new Thickness(4), TextWrapping = Avalonia.Media.TextWrapping.Wrap });
             if (connection.RdpShareEnabled) {
                 tools.Children.Add(Button("Copier le chemin du partage", async () => {
                     try { var clipboard = Clipboard ?? throw new IOException("Presse-papiers indisponible."); await clipboard.SetTextAsync(@"\\tsclient\MGRemote"); _status.Text = connection.Clipboard ? "Chemin copié : collez-le dans l’Explorateur Windows du serveur." : @"Chemin copié localement. Le presse-papiers RDP est désactivé : saisissez \\tsclient\MGRemote dans l’Explorateur distant."; }

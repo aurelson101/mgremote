@@ -214,6 +214,9 @@ public sealed partial class MainWindow
             blocked = false; try { Persist([]); } catch (IOException) { blocked = true; }
             if (!blocked || File.ReadAllText(_dataPath) != encrypted) throw new Exception("Manual profile lock modified the saved profile or permitted writes.");
             int tabs = _tabs.Count; Launch(false); External();
+            var failure = OwnedWindows.Single(w => w.Title == "Connexion impossible");
+            if (!failure.GetLogicalDescendants().OfType<TextBlock>().Any(t => t.Text?.Contains("Déverrouillez") == true)) throw new Exception("Locked launch did not explain the failure.");
+            failure.Close();
             if (_tabs.Count != tabs || _status.Text?.Contains("Déverrouillez") != true) throw new Exception("Locked profile can open a client.");
             Console.WriteLine("PASS: manual profile lock cancellation, owned-process shutdown, in-memory key/editor cleanup and locked launch/write guards.");
             Console.WriteLine("PASS: optional startup profile dialog skip/encrypt, close during key derivation preserves plaintext, canceled unlock write block and successful profile unlock; temporary profile only.");

@@ -24,6 +24,7 @@ public sealed partial class FileTransferPane : UserControl, IDisposable
     private bool _busy, _disposed;
     private Task _operation = Task.CompletedTask;
     private string? _localTarget;
+    private string? _receivedFolder;
     internal Task ShutdownCompletion { get; private set; } = Task.CompletedTask;
     internal FileTransferPane(Connection connection, Func<Task<CredentialBroker?>>? unlock = null)
     {
@@ -48,10 +49,12 @@ public sealed partial class FileTransferPane : UserControl, IDisposable
             if (!_disposed && !_busy && _session == null) _remote.Text = text;
         }));
         clipboard.Children.Add(Action("Ouvrir le dossier local", () => { OpenLocalFolder(); return Task.CompletedTask; }));
+        clipboard.Children.Add(Action("Copier le dossier reçu", CopyReceivedFolder));
         form.Children.Add(clipboard);
         form.Children.Add(new TextBlock { Text = "Téléchargement dans un nouveau sous-dossier. Les fichiers partiels sont conservés en cas d’annulation. Le terminal ci-dessous affiche la progression et les demandes d’authentification.", TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         form.Children.Add(_destination); root.Children.Add(new ScrollViewer { Content = form, MaxHeight = 390 }); _status.Margin = new Thickness(0, 10); Grid.SetRow(_status, 1); root.Children.Add(_status);
         Grid.SetRow(_progress, 2); root.Children.Add(_progress); Content = root;
+        InstallMouseMenus();
         _direction.SelectionChanged += (_, _) => { _overwrite.IsVisible = _direction.SelectedIndex == 0; _overwrite.IsChecked = false; };
         DragDrop.SetAllowDrop(_local, true);
         _local.AddHandler(DragDrop.DragOverEvent, (_, e) => { e.DragEffects = !_busy && !_disposed && _session == null && e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; });
@@ -122,6 +125,7 @@ public sealed partial class FileTransferPane : UserControl, IDisposable
             if (_disposed || cancel.IsCancellationRequested) { _credentials?.Dispose(); _credentials = null; return; }
             _session = new EmbeddedSession(parent => { var start = SessionLauncher.Terminal(parent, plan.Executable, plan.Arguments); _credentials?.Configure(start, "SSH"); return start; }, message => { if (!_disposed) _status.Text = message; });
             _localTarget = download ? plan.LocalTarget : Path.GetDirectoryName(sources[0]);
+            if (download) _receivedFolder = plan.LocalTarget;
             _destination.Text = download ? "Dossier de réception : " + plan.LocalTarget : sources.Length + " élément(s) locaux à envoyer.";
             _progress.Content = _session; _status.Text = download ? "Téléchargement lancé dans " + plan.LocalTarget + ". Le terminal affiche la progression." : "Envoi de " + sources.Length + " élément(s). Le terminal affiche la progression ; Annuler / fermer arrête la session.";
         } catch (OperationCanceledException) { if (!_disposed) _status.Text = "Préparation annulée ; aucun transfert démarré."; }

@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.16 — development preview
+# MGRemote Linux Desktop 0.2.17 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -124,3 +124,9 @@ Paths such as `~/.ssh/ia` are expanded to the current user’s home directory du
 SSH text keeps Ctrl+Shift+C/V in the terminal. Each SSH session now offers a direct SFTP shortcut. The SFTP pane accepts native clipboard files/folders, drag-and-drop, multiple file selection and one local path per line (up to 100 elements). Folder mode is selected when a pasted/dropped directory is present. Multiple uploads require an existing remote directory ending with `/`; duplicate source basenames, including case-only differences, are rejected to prevent collisions. Pasting or dropping only prepares the form: sending still requires explicit overwrite confirmation. Downloads support recursive folders and use a new private reception directory. Inputs are frozen during preparation/transfer; close the transfer before preparing another.
 
 RDP text/image clipboard remains available. The explicit bidirectional file mode requires the xfreerdp3 executable and uses [FreeRDP 3 clipboard direction options](https://github.com/FreeRDP/FreeRDP/blob/3.0.0/client/common/cmdline.c). With FreeRDP 3, files are disabled when that mode is unchecked; older clients keep their existing global clipboard behavior. For folders and a consistent file workflow, configure an explicit shared local directory and access `\\tsclient\MGRemote` from the remote Windows Explorer. The session toolbar copies this path or opens the local directory. Only the selected directory is shared. Server policies and client support may limit clipboard formats; remote RDP/SSH servers still require live validation.
+
+## Development update 0.2.17: mouse copy/paste
+
+SSH terminals now copy a left-button text selection to both PRIMARY and CLIPBOARD when the button is released. Right-click pastes CLIPBOARD without appending Enter; Ctrl+Shift+C/V and normal middle-button behavior remain available. Hold Shift when a remote application captures mouse events, as described in the [xterm manual](https://invisible-island.net/xterm/manpage/xterm.html). RDP keeps the remote application’s native right-click Copy/Paste menus and the existing clipboard settings.
+
+SFTP fields now expose right-click text and file/folder commands. Copy local files or the latest received directory to the system clipboard, then paste through the local file manager. The received directory can contain partial files if the transfer was interrupted. These clipboard actions do not start transfers.

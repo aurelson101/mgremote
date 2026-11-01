@@ -243,7 +243,7 @@ public static class Connections
 
 public static class SessionLauncher
 {
-    internal const string ClipboardTranslations = "XTerm*VT100.translations: #override\\n Ctrl Shift <Key>C: copy-selection(CLIPBOARD)\\n Ctrl Shift <Key>V: insert-selection(CLIPBOARD)";
+    internal const string ClipboardTranslations = "XTerm*VT100.translations: #override\\n Ctrl Shift <Key>C: copy-selection(CLIPBOARD)\\n Ctrl Shift <Key>V: insert-selection(CLIPBOARD)\\n ~Ctrl ~Meta <Btn1Up>: select-end(PRIMARY, CLIPBOARD)\\n ~Ctrl ~Meta <Btn3Down>: insert-selection(CLIPBOARD)\\n ~Ctrl ~Meta <Btn3Up>: ignore()";
     public static List<string> Arguments(Connection c, bool sftp = false, bool modernRdpClipboard = false)
     {
         Connections.Validate(c);
