@@ -1,4 +1,4 @@
-# MGRemote Linux Desktop 0.2.11 — development preview
+# MGRemote Linux Desktop 0.2.12 — development preview
 
 This branch targets the same desktop workflow as MGRemote Windows. It is **not a feature-equivalent release** and must not replace the published Linux package as a parity-complete build.
 
@@ -96,3 +96,9 @@ Only saved connections, folders and configuration are included. Private SSH key 
 The key action immediately opens a dialog with a direct path field, including `~/.ssh/...`; the system file chooser is optional. Invalid paths, public keys, PPK files and unsafe permissions display an inline error. Selection stores a reference to the existing key; save the connection to persist it.
 
 The AppImage includes xterm and its terminal-specific libraries, built for Ubuntu 24.04 x86-64, with pinned SHA-256 package/source hashes from signed Ubuntu indexes. System xterm takes precedence when installed. The bundle includes copyright notices and corresponding source under `usr/bin/terminal`. Packaging requires Linux, Python 3.11+, dpkg-deb and the existing .NET/SquashFS tools. No packages are installed on the build host. Missing session prerequisites are checked before creating a session tab and shown in a dialog.
+
+## Development update 0.2.12: bounded SSH validation and visible session failures
+
+SSH keys and certificates are read through a descriptor opened without following symbolic links in the file or parent directories. Permissions are checked on that descriptor and reads are bounded even if a file grows. Private keys require complete PEM armor with valid base64; encrypted PKCS#8, OpenSSH and legacy encrypted PEM armor remain supported. This validates the container; OpenSSH validates and decrypts the actual key when connecting.
+
+Key validation runs in the background, can be canceled without changing the connection, and repeated clicks reuse the existing dialog. Actions remain visible in a compact dialog, with Enter/Escape support and an accessible path label. Embedded clients that exit before displaying a window or fail to display within ten seconds now show an error pane. Startup polling uses a monotonic clock and reduces its frequency once the client is ready.

@@ -7,6 +7,7 @@ internal static class SelfTest
         ConnectionSettingsTests.Run();
         ProfileEncryptionTests.Run();
         ProfileTransferTests.Run();
+        SshFileTests.Run();
         int count = 0;
         void Check(bool condition) { if (!condition) throw new Exception("Linux self-test failed at " + count); count++; }
         void Reject(Action action) { bool rejected = false; try { action(); } catch (ArgumentException) { rejected = true; } Check(rejected); }

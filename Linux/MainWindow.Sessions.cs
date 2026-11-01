@@ -83,6 +83,14 @@ public sealed partial class MainWindow
             Console.WriteLine("PASS: background-tab closure preserves the active session, adjacent selection and repeated close safety.");
         } finally { CloseSession(first); CloseSession(background); CloseSession(last); }
     }
+    private static Grid SessionContent(EmbeddedSession native, TextBlock status)
+    {
+        var error = new TextBlock { IsVisible = false, TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = 560, Margin = new Thickness(24), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        native.Failed += message => { native.IsVisible = false; error.Text = message; error.IsVisible = true; };
+        var content = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+        content.Children.Add(native); Grid.SetRow(status, 1); content.Children.Add(status); content.Children.Add(error);
+        return content;
+    }
     private async void Launch(bool sftp)
     {
         CredentialBroker? credentials = null;
@@ -105,7 +113,7 @@ public sealed partial class MainWindow
             }
             var status = new TextBlock { Text = "Initialisation…", Margin = new Thickness(8), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
             var native = new EmbeddedSession(parent => { var start = SessionLauncher.Embedded(model, sftp, parent); ownedCredentials?.Configure(start, model.Protocol); return start; }, text => { status.Text = text; _status.Text = text; });
-            var content = new Grid { RowDefinitions = new RowDefinitions("*,Auto") }; content.Children.Add(native); Grid.SetRow(status, 1); content.Children.Add(status);
+            var content = SessionContent(native, status);
             AddSession(new SessionTab((sftp ? "SFTP · " : "") + model.Name, content, native, Credentials: ownedCredentials)); credentials = null;
         } catch (OperationCanceledException) { credentials?.Dispose(); _status.Text = "Connexion annulée."; }
         catch (Exception ex) {
@@ -172,5 +180,21 @@ public sealed partial class MainWindow
         }
         using var transfer = new FileTransferPane(new Connection { Name = "Fixture", Host = "example.invalid" }); await transfer.VerifyValidation();
         Console.WriteLine("PASS: embedded tabs, idle resize suppression, real PID cleanup and transfer UI validation.");
+        foreach (string executable in new[] { "/usr/bin/false", "/nonexistent/mgremote-fixture", "/usr/bin/sleep" }) {
+            var status = new TextBlock();
+            var failed = new EmbeddedSession(_ => {
+                var start = new System.Diagnostics.ProcessStartInfo(executable) { UseShellExecute = false };
+                if (executable.EndsWith("/sleep", StringComparison.Ordinal)) start.ArgumentList.Add("30");
+                return start;
+            }, text => status.Text = text);
+            var body = SessionContent(failed, status);
+            var tab = new SessionTab("Startup failure fixture", body, failed);
+            try {
+                AddSession(tab); var deadline = DateTime.UtcNow.AddSeconds(14);
+                while ((!failed.StartupFailed || failed.IsVisible) && DateTime.UtcNow < deadline) await Task.Delay(50);
+                if (!failed.StartupFailed || failed.IsVisible || !body.Children.OfType<TextBlock>().Any(t => t != status && t.IsVisible && !string.IsNullOrWhiteSpace(t.Text))) throw new Exception("Failed startup left a blank session pane.");
+            } finally { CloseSession(tab); await failed.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(8)); }
+        }
+        Console.WriteLine("PASS: early client exit, missing executable and startup timeout show a visible error pane and stop owned processes.");
     }
 }

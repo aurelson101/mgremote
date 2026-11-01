@@ -54,10 +54,10 @@ internal static class ProfileEncryption
     {
         if (descriptor >= 0) return new SafeFileHandle((nint)descriptor, ownsHandle: true);
         int error = Marshal.GetLastPInvokeError();
-        if (error == 2) throw new FileNotFoundException("Profil introuvable.", file);
-        throw new IOException("Ouverture sûre du profil refusée (code " + error + ").");
+        if (error == 2) throw new FileNotFoundException("Fichier introuvable.", file);
+        throw new IOException("Ouverture sûre du fichier refusée (code " + error + ").");
     }
-    private static FileStream OpenProfileRead(string file)
+    internal static FileStream OpenLocalRead(string file)
     {
         string full = Path.GetFullPath(file);
         if (!OperatingSystem.IsLinux()) { RejectLinkedPath(full); return new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read); }
@@ -74,7 +74,7 @@ internal static class ProfileEncryption
     }
     internal static string ReadProfileText(string file)
     {
-        using var stream = OpenProfileRead(file);
+        using var stream = OpenLocalRead(file);
         return ReadBoundedText(stream, MaxFile);
     }
     internal static string Revision(string content) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));

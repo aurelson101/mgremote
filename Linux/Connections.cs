@@ -314,16 +314,30 @@ public static class SessionLauncher
     }
     internal static void ValidateIdentityFile(string path)
     {
+        string content = ReadSshFile(path, 1048576, privateKey: true).Trim();
+        // Validate legacy encrypted PEM armor too; the original file is passed unchanged to SSH.
+        content = Regex.Replace(content, @"\A(-----BEGIN (?:RSA|DSA|EC) PRIVATE KEY-----\r?\n)Proc-Type: 4,ENCRYPTED\r?\nDEK-Info: [A-Za-z0-9-]+,[0-9A-Fa-f]+\r?\n\r?\n", "$1");
+        ReadOnlySpan<char> text = content.AsSpan();
+        if (System.Security.Cryptography.PemEncoding.TryFind(text, out var fields)) {
+            var (offset, length) = fields.Location.GetOffsetAndLength(text.Length);
+            string label = text[fields.Label].ToString();
+            if (offset == 0 && length == text.Length && fields.DecodedDataLength > 0 &&
+                label is "OPENSSH PRIVATE KEY" or "RSA PRIVATE KEY" or "DSA PRIVATE KEY" or "EC PRIVATE KEY" or "PRIVATE KEY" or "ENCRYPTED PRIVATE KEY") return;
+        }
+        throw new IOException("Clé privée OpenSSH/PEM complète requise (base64 et marqueurs début/fin valides). Une clé publique (.pub) ne convient pas ; convertissez les clés PuTTY (.ppk) au format OpenSSH.");
+    }
+    private static string ReadSshFile(string path, int maximumBytes, bool privateKey)
+    {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Cette édition nécessite Linux.");
-        var identity = new FileInfo(path);
-        if (!Path.IsPathFullyQualified(path) || !identity.Exists || identity.LinkTarget != null || identity.Length is < 1 or > 1048576) throw new IOException("Choisissez une clé privée locale Linux existante (1 Mio maximum, sans lien symbolique).");
-        if ((File.GetUnixFileMode(path) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
-            throw new IOException("La clé privée doit être accessible uniquement à son propriétaire (permissions 600). Corrigez ses permissions avant de la sélectionner.");
-        using var key = File.OpenText(path);
-        var header = new char[100];
-        string marker = new string(header, 0, key.Read(header, 0, header.Length)).Split('\n')[0].TrimEnd('\r');
-        if (!marker.StartsWith("-----BEGIN ", StringComparison.Ordinal) || !marker.EndsWith("PRIVATE KEY-----", StringComparison.Ordinal))
-            throw new IOException("Clé privée OpenSSH/PEM requise. Une clé publique (.pub) ne convient pas ; convertissez les clés PuTTY (.ppk) au format OpenSSH.");
+        if (!Path.IsPathFullyQualified(path)) throw new IOException("Chemin absolu requis pour le fichier SSH.");
+        // Open each component without following links, then inspect and read the same descriptor.
+        using var stream = ProfileEncryption.OpenLocalRead(path);
+        var forbidden = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
+        if (privateKey) forbidden |= UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+        if ((File.GetUnixFileMode(stream.SafeFileHandle) & forbidden) != 0)
+            throw new IOException(privateKey ? "La clé privée doit être accessible uniquement à son propriétaire (permissions 600)." : "Le certificat SSH ne doit pas être modifiable par le groupe ou les autres utilisateurs.");
+        try { return ProfileEncryption.ReadBoundedText(stream, maximumBytes); }
+        catch (InvalidDataException) { throw new IOException("Fichier SSH trop volumineux (maximum " + maximumBytes / 1024 + " Kio)."); }
     }
     internal static void Preflight(Connection c)
     {
@@ -341,13 +355,8 @@ public static class SessionLauncher
             ValidateIdentityFile(c.Identity);
         }
         if (c.CertificateFile.Length > 0 && c.Protocol == "SSH") {
-            var certificate = new FileInfo(c.CertificateFile);
-            if (!Path.IsPathFullyQualified(c.CertificateFile) || !certificate.Exists || certificate.LinkTarget != null || certificate.Length is < 1 or > 65536)
-                throw new IOException("Choisissez un certificat public OpenSSH local existant (64 Kio maximum).");
-            if ((File.GetUnixFileMode(c.CertificateFile) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
-                throw new IOException("Le certificat SSH ne doit pas être modifiable par le groupe ou les autres utilisateurs.");
-            using var reader = certificate.OpenText();
-            string header = reader.ReadLine() ?? "";
+            string content = ReadSshFile(c.CertificateFile, 65536, privateKey: false);
+            string header = content.Split('\n', 2)[0].TrimEnd('\r');
             if (!Regex.IsMatch(header, @"\A(?:ssh|ecdsa|sk)-[A-Za-z0-9@.-]+-cert-v01@openssh\.com [A-Za-z0-9+/]+={0,2}(?: |$)"))
                 throw new IOException("Un certificat public OpenSSH signé (-cert.pub) est requis.");
         }

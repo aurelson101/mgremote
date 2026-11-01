@@ -102,7 +102,7 @@ public sealed partial class MainWindow : Window
     private bool _storeLoaded = true, _closing;
     public MainWindow()
     {
-        Title = "MGRemote — Linux Desktop 0.2.11"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
+        Title = "MGRemote — Linux Desktop 0.2.12"; Width = 1280; Height = 850; MinWidth = 900; MinHeight = 600; FontSize = 12;
         Background = DesktopAppearance.Chrome; Foreground = DesktopAppearance.Text;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Background };
         var menus = new Menu(); menus.Classes.Add("desktop-menu");
@@ -260,39 +260,51 @@ public sealed partial class MainWindow : Window
             RememberTreeSelection(item); Filter(); if (_nodes.TryGetValue(item, out var node)) _list.SelectedItem = node; Edit(item); _status.Text = "Connexion enregistrée ; les secrets importés restent chiffrés.";
         } catch (Exception ex) { _status.Text = ex.Message; }
     }
+    private Window? _keyPicker;
     private async Task ChooseKey(Action<Window>? shown = null)
     {
-        var dialog = new Window { Title = "Clé privée SSH", Width = 540, Height = 290, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        if (_keyPicker != null) { _keyPicker.Activate(); return; }
+        var dialog = new Window { Title = "Clé privée SSH", Width = 540, Height = 330, MinWidth = 420, MinHeight = 240, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        _keyPicker = dialog;
+        bool closed = false; Task? pending = null;
         var path = new TextBox { Text = _key.Text, PlaceholderText = "~/.ssh/id_ed25519" };
+        Avalonia.Automation.AutomationProperties.SetName(path, "Chemin de la clé privée SSH");
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var panel = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
         panel.Children.Add(new TextBlock { Text = "Saisissez le chemin de votre clé privée OpenSSH/PEM ou choisissez un fichier. Une clé publique (.pub) ne permet pas de vous authentifier.", TextWrapping = TextWrapping.Wrap });
-        panel.Children.Add(path);
+        panel.Children.Add(new TextBlock { Text = "Chemin de la clé privée" }); panel.Children.Add(path);
         var browse = new Button { Content = "Parcourir…" };
         browse.Click += async (_, _) => {
             browse.IsEnabled = false;
             error.Text = "Sélecteur système ouvert. S’il ne répond pas, fermez-le et saisissez le chemin directement.";
             try {
                 var files = await dialog.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Choisir une clé privée SSH", AllowMultiple = false });
-                if (files.Count > 0) path.Text = files[0].TryGetLocalPath();
-                error.Text = "";
-            } catch (Exception ex) { error.Text = "Sélecteur indisponible : " + ex.Message + " Saisissez le chemin directement."; }
-            finally { browse.IsEnabled = true; }
+                if (!closed) { if (files.Count > 0) path.Text = files[0].TryGetLocalPath(); error.Text = ""; }
+            } catch (Exception ex) { if (!closed) error.Text = "Sélecteur indisponible : " + ex.Message + " Saisissez le chemin directement."; }
+            finally { if (!closed) browse.IsEnabled = true; }
         };
         panel.Children.Add(browse); panel.Children.Add(error);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        actions.Children.Add(Button("Annuler", () => dialog.Close()));
-        actions.Children.Add(Button("Utiliser cette clé", () => {
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(18, 0, 18, 18) };
+        var cancel = Button("Annuler", () => dialog.Close()); cancel.IsCancel = true; actions.Children.Add(cancel);
+        var use = new Button { Content = "Utiliser cette clé", IsDefault = true };
+        async Task Validate()
+        {
+            use.IsEnabled = browse.IsEnabled = path.IsEnabled = false; error.Text = "Vérification du fichier…";
             try {
                 string selected = SessionLauncher.IdentityPath(path.Text ?? "");
-                SessionLauncher.ValidateIdentityFile(selected);
+                await Task.Run(() => SessionLauncher.ValidateIdentityFile(selected));
+                if (closed || _closing || !_storeLoaded) return;
                 _key.Text = selected; _status.Text = "Clé privée sélectionnée. Enregistrez la connexion pour conserver ce chemin."; dialog.Close();
-            } catch (Exception ex) { error.Text = ex.Message; }
-        }));
-        panel.Children.Add(actions); dialog.Content = new ScrollViewer { Content = panel };
-        var completed = dialog.ShowDialog(this);
-        shown?.Invoke(dialog);
-        await completed;
+            } catch (Exception ex) { if (!closed) error.Text = ex.Message; }
+            finally { if (!closed) use.IsEnabled = browse.IsEnabled = path.IsEnabled = true; }
+        }
+        use.Click += (_, _) => { if (use.IsEnabled) pending = Validate(); }; actions.Children.Add(use);
+        var layout = new Grid { RowDefinitions = new RowDefinitions("*,Auto"), Background = DesktopAppearance.Surface };
+        layout.Children.Add(new ScrollViewer { Content = panel }); Grid.SetRow(actions, 1); layout.Children.Add(actions); dialog.Content = layout;
+        dialog.Opened += (_, _) => path.Focus();
+        dialog.Closed += (_, _) => { closed = true; _keyPicker = null; };
+        try { var completed = dialog.ShowDialog(this); shown?.Invoke(dialog); await completed; if (pending != null) await pending; }
+        finally { if (ReferenceEquals(_keyPicker, dialog)) _keyPicker = null; }
     }
     internal async Task VerifyKeySelection()
     {
@@ -301,7 +313,9 @@ public sealed partial class MainWindow : Window
         string directory = Path.Combine(Path.GetTempPath(), "mgremote-key-ui-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         string file = Path.Combine(directory, "synthetic-key"), previous = _key.Text ?? "";
-        File.WriteAllText(file, "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic test fixture\n-----END OPENSSH PRIVATE KEY-----\n");
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        string fixture = rsa.ExportRSAPrivateKeyPem();
+        File.WriteAllText(file, fixture);
         File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         try {
             var opened = new TaskCompletionSource<Window>();
@@ -310,26 +324,50 @@ public sealed partial class MainWindow : Window
             var controls = Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(dialog).ToArray();
             var input = controls.OfType<TextBox>().Single();
             var use = controls.OfType<Button>().Single(b => b.Content?.ToString() == "Utiliser cette clé");
-            void Click() => use.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+            async Task Click()
+            {
+                use.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                var deadline = DateTime.UtcNow.AddSeconds(4);
+                while (dialog.IsVisible && !use.IsEnabled && DateTime.UtcNow < deadline) await Task.Delay(20);
+                if (dialog.IsVisible && !use.IsEnabled) throw new Exception("SSH key validation did not finish.");
+            }
+            await ChooseKey();
+            if (!ReferenceEquals(_keyPicker, dialog)) throw new Exception("Repeated key selection opened another dialog.");
+            dialog.Width = 420; dialog.Height = 240; await Task.Delay(100);
+            var point = use.TranslatePoint(new Point(), dialog);
+            if (point == null || point.Value.Y < 0 || point.Value.Y + use.Bounds.Height > dialog.ClientSize.Height) throw new Exception("Key dialog actions are clipped.");
             foreach (string invalid in new[] { "relative", Path.Combine(directory, "missing") }) {
-                input.Text = invalid; Click();
+                input.Text = invalid; await Click();
                 if (!dialog.IsVisible || _key.Text != previous) throw new Exception("Invalid key selection was accepted.");
             }
             File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead);
-            input.Text = file; Click();
+            input.Text = file; await Click();
             if (!dialog.IsVisible || _key.Text != previous) throw new Exception("Publicly readable private key was accepted.");
             File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             foreach (string invalid in new[] { "ssh-ed25519 AAAA synthetic-public-key", "PuTTY-User-Key-File-3: ssh-ed25519" }) {
-                File.WriteAllText(file, invalid); Click();
+                File.WriteAllText(file, invalid); await Click();
                 if (!dialog.IsVisible || _key.Text != previous) throw new Exception("Public/PPK key was accepted.");
             }
-            File.WriteAllText(file, "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic test fixture\n-----END OPENSSH PRIVATE KEY-----\n");
-            Click(); await selecting;
+            dialog.Width = 540; dialog.Height = 330; await Task.Delay(100);
+            using (var image = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)dialog.ClientSize.Width, (int)dialog.ClientSize.Height))) {
+                image.Render((Visual)dialog.Content!);
+                image.Save(Environment.GetCommandLineArgs().Single(a => a.StartsWith("--smoke-ui="))[11..].Replace(".png", "-key.png"), new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+            }
+            File.WriteAllText(file, fixture);
+            await Click(); await selecting;
             if (_key.Text != file) throw new Exception("Direct key-path selection did not update the connection.");
             await ChooseKey(canceled => canceled.Close());
             if (_key.Text != file) throw new Exception("Canceling changed the selected key.");
+            _key.Text = previous;
+            await ChooseKey(canceled => {
+                var descendants = Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(canceled).ToArray();
+                descendants.OfType<TextBox>().Single().Text = file;
+                descendants.OfType<Button>().Single(b => b.Content?.ToString() == "Utiliser cette clé").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                canceled.Close();
+            });
+            if ((_key.Text ?? "") != previous) throw new Exception("Canceled validation changed the connection.");
             if (!SessionLauncher.IdentityPath("~/.ssh/id_ed25519").StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "/", StringComparison.Ordinal)) throw new Exception("Home path expansion failed.");
-            Console.WriteLine("PASS: visible SSH key dialog, direct path, missing/relative/public/PPK/unsafe-permission rejection, successful selection and cancellation.");
+            Console.WriteLine("PASS: responsive SSH key dialog, compact fixed actions, repeated-open guard, direct path, invalid-key rejection, successful selection and cancellation during validation.");
         } finally { _key.Text = previous; Directory.Delete(directory, true); }
     }
     private async Task Import()
