@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('x64','arm64')][string]$Platform = 'x64',
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.16',
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.17',
     [ValidatePattern('^[A-Fa-f0-9]{40}$')][string]$CertificateThumbprint
 )
 $ErrorActionPreference = 'Stop'

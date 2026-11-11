@@ -40,6 +40,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
         protected readonly FrmMain _frmMain = FrmMain.Default;
         protected bool loginComplete;
         private bool _alertOnIdleDisconnect;
+        private int _reconnectCheck, _reconnectGeneration;
         protected uint DesktopScaleFactor => (uint)(_displayProperties.ResolutionScalingFactor.Width * 100);
         protected readonly uint DeviceScaleFactor = 100;
         protected readonly uint Orientation = 0;
@@ -202,6 +203,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         public override bool Connect()
         {
+            Interlocked.Increment(ref _reconnectGeneration);
             loginComplete = false;
             SetEventHandlers();
 
@@ -235,8 +237,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         public override void Close()
         {
+            Interlocked.Increment(ref _reconnectGeneration);
             try
             {
+                tmrReconnect.Stop();
                 if (_rdpClient != null)
                 {
                     _rdpClient.OnConnecting -= RDPEvent_OnConnecting;
@@ -974,20 +978,27 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private void RDPEvent_OnDisconnected(int discReason)
         {
             const int UI_ERR_NORMAL_DISCONNECT = 0xB08;
-            Runtime.MessageCollector.AddMessage(MessageClass.DebugMsg, $"RDP disconnected: reason={discReason} (0x{discReason:X}), extended={_rdpClient.ExtendedDisconnectReason}, loginComplete={loginComplete}");
+            int generation = Volatile.Read(ref _reconnectGeneration);
+            var owner = Control;
+            var extendedReason = _rdpClient.ExtendedDisconnectReason;
+            Runtime.MessageCollector.AddMessage(MessageClass.DebugMsg, $"RDP disconnected: reason={discReason} (0x{discReason:X}), extended={extendedReason}, loginComplete={loginComplete}");
             if (discReason != UI_ERR_NORMAL_DISCONNECT)
             {
-                string reason = _rdpClient.GetErrorDescription((uint)discReason, (uint)_rdpClient.ExtendedDisconnectReason);
+                string reason = _rdpClient.GetErrorDescription((uint)discReason, (uint)extendedReason);
                 Event_Disconnected(this, reason, discReason);
+                if (generation != Volatile.Read(ref _reconnectGeneration) || owner == null || owner.IsDisposed || owner.Disposing) return;
                 if (!loginComplete && discReason != 1 && discReason != 2)
                     MessageBox.Show(Control, "La connexion RDP s’est arrêtée avant l’ouverture du bureau.\n\n" + reason +
-                        $"\nCode : {discReason} (0x{discReason:X}) / {_rdpClient.ExtendedDisconnectReason}\n\n" +
+                        $"\nCode : {discReason} (0x{discReason:X}) / {extendedReason}\n\n" +
                         "Pour confirmer manuellement un certificat, choisissez « Avertir si l’authentification échoue » dans le profil RDP. Vérifiez le certificat présenté. CredSSP/NLA reste requis.",
                         "Connexion RDP interrompue", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
 
+            if (owner == null || owner.IsDisposed || owner.Disposing) return;
+            if (discReason == UI_ERR_NORMAL_DISCONNECT || discReason == 1 || discReason == 2) { Close(); return; }
             if (Properties.OptionsAdvancedPage.Default.ReconnectOnDisconnect)
             {
+                ReconnectGroup?.DisposeReconnectGroup();
                 ReconnectGroup = new ReconnectGroup();
                 ReconnectGroup.CloseClicked += Event_ReconnectGroupCloseClicked;
                 ReconnectGroup.Left = (int)((double)Control.Width / 2 - (double)ReconnectGroup.Width / 2);
@@ -1062,24 +1073,33 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private void tmrReconnect_Elapsed(object sender, ElapsedEventArgs e)
         {
+            var owner = Control;
+            var group = ReconnectGroup;
+            int generation = Volatile.Read(ref _reconnectGeneration);
+            if (owner == null || owner.IsDisposed || !owner.IsHandleCreated || group == null || group.IsDisposed ||
+                Interlocked.CompareExchange(ref _reconnectCheck, 1, 0) != 0) return;
             try
             {
-                bool srvReady = PortScanner.IsPortOpen(connectionInfo.Hostname, Convert.ToString(connectionInfo.Port));
-
-                ReconnectGroup.ServerReady = srvReady;
-
-                if (!ReconnectGroup.ReconnectWhenReady || !srvReady) return;
-                tmrReconnect.Enabled = false;
-                ReconnectGroup.DisposeReconnectGroup();
-                //SetProps()
-                _rdpClient.Connect();
+                bool ready = PortScanner.IsPortOpen(connectionInfo.Hostname, Convert.ToString(connectionInfo.Port));
+                if (generation != Volatile.Read(ref _reconnectGeneration) || owner.IsDisposed || !owner.IsHandleCreated) return;
+                owner.BeginInvoke(new Action(() => {
+                    if (generation != Volatile.Read(ref _reconnectGeneration) || owner.IsDisposed || owner.Disposing ||
+                        !ReferenceEquals(group, ReconnectGroup) || group.IsDisposed) return;
+                    try {
+                        group.ServerReady = ready;
+                        if (!group.ReconnectWhenReady || !ready) return;
+                        tmrReconnect.Stop(); group.DisposeReconnectGroup();
+                        _rdpClient.Connect();
+                    } catch (Exception ex) {
+                        Runtime.MessageCollector.AddExceptionMessage(Language.AutomaticReconnectError, ex, MessageClass.WarningMsg, false);
+                    }
+                }));
             }
             catch (Exception ex)
             {
-                Runtime.MessageCollector.AddExceptionMessage(
-                    string.Format(Language.AutomaticReconnectError, connectionInfo.Hostname),
-                    ex, MessageClass.WarningMsg, false);
+                Runtime.MessageCollector.AddExceptionMessage(Language.AutomaticReconnectError, ex, MessageClass.WarningMsg, false);
             }
+            finally { Interlocked.Exchange(ref _reconnectCheck, 0); }
         }
 
         #endregion

@@ -151,7 +151,7 @@ internal static class Program
                     SshLayouts = sshCycles, NewConnectionDialogValidated = true, ConnectionEditorValidated = true, MultiScreenGeometryValidated = true,
                     TerminalChildCleanupValidated = true, SerialConsoleValidated = true, AnyDeskOptionalDialogValidated = true, IllegalCrossThreadChecks = true, PluginInitializationOnUiThread = true,
                     TunnelProcessOwnershipValidated = true, OptionalSshKeyEditorValidated = true,
-                    RdpSharingSettingsValidated = true, RdpActiveXRedirectionValidated = true, SshClipboardTextValidated = true, ConPtyAnsiTerminalValidated = true, SftpTransferDialogValidated = true,
+                    RdpSharingSettingsValidated = true, RdpActiveXRedirectionValidated = true, RdpReconnectUiDispatchValidated = true, SshClipboardTextValidated = true, ConPtyAnsiTerminalValidated = true, SftpTransferDialogValidated = true,
                     CatalogDoesNotReinitializePlugins = true, RealMixedDpiMonitorsTested = false, LiveRdpSshTested = false };
                 string json = System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(Path.Combine(artifacts, "gui-verification.json"), json);
@@ -258,6 +258,27 @@ internal static class Program
             modelType.GetProperty("RedirectDiskDrives").SetValue(model, Enum.Parse(modelType.GetProperty("RedirectDiskDrives").PropertyType, "None"));
             rdpBase.GetMethod("SetRedirection", Fields).Invoke(rdp, null);
             Check(!(bool)client.AdvancedSettings6.RedirectClipboard && !(bool)client.AdvancedSettings2.RedirectDrives, "RDP sharing cannot be disabled again.");
+            using (var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0)) {
+                listener.Start();
+                modelType.GetProperty("Hostname").SetValue(model, "127.0.0.1");
+                modelType.GetProperty("Port").SetValue(model, ((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+                using var group = (Control)Activator.CreateInstance(app.GetType("mRemoteNG.Tools.ReconnectGroup", true));
+                group.Parent = bridge; group.CreateControl(); bridge.CreateControl();
+                var groupType = group.GetType(); groupType.GetProperty("ReconnectWhenReady").SetValue(group, false);
+                rdpBase.GetField("ReconnectGroup", Fields).SetValue(rdp, group);
+                var poll = rdpBase.GetMethod("tmrReconnect_Elapsed", Fields);
+                var worker = Task.Run(() => poll.Invoke(rdp, new object[] { null, null }));
+                Check(worker.Wait(TimeSpan.FromSeconds(5)), "Reconnect poll blocked waiting for the UI thread.");
+                Check(!(bool)groupType.GetProperty("ServerReady").GetValue(group), "Reconnect poll changed UI state on its worker thread.");
+                Application.DoEvents();
+                Check((bool)groupType.GetProperty("ServerReady").GetValue(group), "Reconnect result did not reach the UI thread.");
+                groupType.GetProperty("ServerReady").SetValue(group, false);
+                worker = Task.Run(() => poll.Invoke(rdp, new object[] { null, null }));
+                Check(worker.Wait(TimeSpan.FromSeconds(5)), "Second reconnect probe blocked.");
+                rdp.GetType().GetMethod("Close").Invoke(rdp, null); Application.DoEvents();
+                Check(!(bool)groupType.GetProperty("ServerReady").GetValue(group), "A queued reconnect modified a closed session.");
+            }
+
         }
         ((IDisposable)rdp).Dispose();
         modelType.GetProperty("Protocol").SetValue(model, Enum.Parse(modelType.GetProperty("Protocol").PropertyType, "SSH2"));
