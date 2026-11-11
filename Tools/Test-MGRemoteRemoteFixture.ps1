@@ -31,6 +31,7 @@ if ($Action -eq 'Stop') {
         if ($s.OldCert) { Set-ItemProperty $tcp SSLCertificateSHA1Hash ([byte[]]$s.OldCert) } else { Remove-ItemProperty $tcp SSLCertificateSHA1Hash -ErrorAction SilentlyContinue }
         Restart-Service TermService -Force
         if ($s.OldServiceStatus -ne "Running") { Stop-Service TermService -Force }
+        Set-Service TermService -StartupType $s.OldStartType
     }
     if ($s.Task) { Stop-ScheduledTask -TaskName $s.Task -ErrorAction SilentlyContinue;Unregister-ScheduledTask -TaskName $s.Task -Confirm:$false -ErrorAction SilentlyContinue }
     Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($s.Root,[StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -39,7 +40,7 @@ if ($Action -eq 'Stop') {
         Remove-Item ('Cert:\CurrentUser\Root\'+$s.Cert) -ErrorAction SilentlyContinue
         Remove-Item ('Cert:\LocalMachine\My\'+$s.Cert) -DeleteKey -ErrorAction SilentlyContinue
     }
-    $sessions = & quser.exe $s.User 2>$null
+    $sessions = try { & quser.exe $s.User 2>$null } catch { @() }
     foreach ($line in $sessions) { if ($line -match ('^\s*>?\s*'+[regex]::Escape($s.User)+'\s+(?:\S+\s+)?(?<id>\d+)\s+(?:Active|Disc)')) { & logoff.exe $Matches.id } }
     ([ADSI]("WinNT://$env:COMPUTERNAME")).Delete('user',$s.User)
     Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $s.Sid -and !$_.Loaded } | Remove-CimInstance -ErrorAction SilentlyContinue
@@ -116,7 +117,7 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     Add-FixtureGroup 'S-1-5-32-544'
     $tcp='HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
     $old=Get-ItemProperty $tcp
-    $state.OldUserAuthentication=$old.UserAuthentication;$state.OldServiceStatus=(Get-Service TermService).Status.ToString()
+    $state.OldUserAuthentication=$old.UserAuthentication;$state.OldServiceStatus=(Get-Service TermService).Status.ToString();$state.OldStartType=(Get-Service TermService).StartType.ToString()
     $state.OldPort=$old.PortNumber;$state.OldCert=$old.SSLCertificateSHA1Hash
     $state.OldDeny=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server').fDenyTSConnections
     $state.RdpPort=Free-Port
@@ -133,6 +134,7 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     Set-ItemProperty $tcp UserAuthentication 1
     Get-CimInstance -Namespace root/cimv2/terminalservices -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-tcp'" | Set-CimInstance -Property @{SSLCertificateSHA1Hash=$cert.Thumbprint} | Out-Null
     Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0
+    if ((Get-Service TermService).StartType -eq "Disabled") { Set-Service TermService -StartupType Manual }
     Restart-Service TermService -Force
     $state.RdpAvailable=$true;$state.RdpPassword=$password;$state.RdpDomain=$env:COMPUTERNAME;Save-State
 }
