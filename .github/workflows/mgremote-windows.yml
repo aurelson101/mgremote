@@ -27,6 +27,7 @@ jobs:
           if ($actual -ne '${{ matrix.platform }}') { throw "Expected native ${{ matrix.platform }} host, found $actual" }
           dotnet --info
       - name: Prepare isolated loopback SSH and server RDP fixtures
+        timeout-minutes: 5
         shell: pwsh
         run: ./Tools/Test-MGRemoteRemoteFixture.ps1 -Action Start
       - name: Build and validate Windows MSI
@@ -39,6 +40,7 @@ jobs:
           if ($packages.Count -ne 1) { throw 'Expected exactly one fresh MSI.' }
           ./Tools/Test-MGRemoteInstallCycle.ps1 -PackagePath $packages[0].FullName -AllowDisposableRunner
       - name: Remove isolated accounts keys certificates and fixtures
+        timeout-minutes: 3
         if: always()
         shell: pwsh
         run: ./Tools/Test-MGRemoteRemoteFixture.ps1 -Action Stop

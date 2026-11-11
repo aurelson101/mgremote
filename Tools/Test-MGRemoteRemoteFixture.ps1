@@ -114,6 +114,7 @@ while (!$listening -and [DateTime]::UtcNow -lt $deadline) {
 if (!$listening) { if (Test-Path (Join-Path $root 'sshd.log')) { Get-Content (Join-Path $root 'sshd.log') -Tail 15 | Write-Host }; throw 'Isolated SSH fixture failed to listen.' }
 # Windows Server supports a separate administrative desktop; client Windows remains single-session.
 if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
+    Write-Host 'Preparing isolated RDP firewall and certificate.'
     if (@(Get-NetFirewallProfile | Where-Object { !$_.Enabled }).Count) { throw 'RDP fixture requires the Windows firewall.' }
     Add-FixtureGroup 'S-1-5-32-544'
     $tcp='HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
@@ -134,10 +135,12 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The fixture private-key file is missing.' }
     $keyAcl=Get-Acl $keyFile;$keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'));Set-Acl $keyFile $keyAcl
     $store=[Security.Cryptography.X509Certificates.X509Store]::new('Root','CurrentUser');$store.Open('ReadWrite');$store.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData));$store.Close()
+    Write-Host 'Binding isolated RDP certificate.'
     $state.RdpChanged=$true;Save-State
     Set-ItemProperty $tcp PortNumber $state.RdpPort
     Set-ItemProperty $tcp UserAuthentication 1
     Get-CimInstance -Namespace root/cimv2/terminalservices -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-tcp'" | Set-CimInstance -Property @{SSLCertificateSHA1Hash=$cert.Thumbprint} | Out-Null
+    Write-Host 'Starting isolated RDP listener.'
     Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0
     if ((Get-Service TermService).StartType -eq "Disabled") { Set-Service TermService -StartupType Manual }
     Restart-Service TermService -Force
