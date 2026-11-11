@@ -46,6 +46,7 @@ if ($Action -eq 'Stop') {
     Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $s.Sid -and !$_.Loaded } | Remove-CimInstance -ErrorAction SilentlyContinue
     if (Test-Path $s.Root) { Remove-Item -LiteralPath $s.Root -Recurse -Force }
     Remove-Item -LiteralPath $stateFile
+    $global:LASTEXITCODE=0
     return
 }
 if (Test-Path $stateFile) { throw 'Fixture state already exists.' }
@@ -123,7 +124,7 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     $state.RdpPort=Free-Port
     $block='MGRemoteBlock-'+$id;$allow='MGRemoteLoopback-'+$id;$state.Firewall=@($block,$allow);Save-State
     New-NetFirewallRule -Name $block -DisplayName $block -Direction Inbound -Action Block -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff') | Out-Null
-    New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress @('127.0.0.1','::1') | Out-Null
+    New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress '127.0.0.1' | Out-Null
     $cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
     $state.Cert=$cert.Thumbprint;Save-State
     $keyName=$cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName
