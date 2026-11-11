@@ -996,7 +996,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         "Connexion RDP interrompue", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
 
-            if (owner == null || owner.IsDisposed || owner.Disposing) return;
+            if (Volatile.Read(ref _closing) != 0 || generation != Volatile.Read(ref _reconnectGeneration) ||
+                owner == null || owner.IsDisposed || owner.Disposing) return;
             if (discReason == UI_ERR_NORMAL_DISCONNECT || discReason == 1 || discReason == 2) { Close(); return; }
             if (Properties.OptionsAdvancedPage.Default.ReconnectOnDisconnect)
             {
