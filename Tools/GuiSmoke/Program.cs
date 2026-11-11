@@ -235,10 +235,16 @@ internal static class Program
             Check((bool)rdp.GetType().GetMethod("Initialize").Invoke(rdp, null), "Windows RDP ActiveX did not initialize offline.");
             var rdpBase = app.GetType("mRemoteNG.Connection.Protocol.RDP.RdpProtocol", true);
             dynamic client = rdpBase.GetField("_rdpClient", Fields).GetValue(rdp);
-            Check((int)client.AdvancedSettings5.AuthenticationLevel == 1 && (bool)client.AdvancedSettings7.EnableCredSspSupport,
-                "Legacy imported RDP preferences did not become a strict-authentication, CredSSP-enabled session.");
+            Check((int)client.AdvancedSettings5.AuthenticationLevel == 2 && (bool)client.AdvancedSettings7.EnableCredSspSupport,
+                "Explicit certificate confirmation was not honored with CredSSP enabled.");
             Check(Equals(modelType.GetProperty("RDPAuthenticationLevel").GetValue(model), legacyAuthentication) &&
                 !(bool)modelType.GetProperty("UseCredSsp").GetValue(model), "Session hardening modified the imported profile.");
+            foreach (int configured in new[] { 0, 1, 2, 99 }) {
+                modelType.GetProperty("RDPAuthenticationLevel").SetValue(model, Enum.ToObject(modelType.GetProperty("RDPAuthenticationLevel").PropertyType, configured));
+                rdpBase.GetMethod("SetAuthenticationLevel", Fields).Invoke(rdp, null);
+                Check((int)client.AdvancedSettings5.AuthenticationLevel == (configured == 2 ? 2 : 1) && (bool)client.AdvancedSettings7.EnableCredSspSupport,
+                    "Certificate mode mapping weakened NLA or ignored explicit confirmation.");
+            }
             Check((bool)client.AdvancedSettings6.RedirectClipboard && (bool)client.AdvancedSettings2.RedirectDrives,
                 "RDP ActiveX did not enable clipboard and the custom drive channel.");
             modelType.GetProperty("RedirectClipboard").SetValue(model, false);
