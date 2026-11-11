@@ -127,7 +127,8 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress '127.0.0.1' | Out-Null
     $cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
     $state.Cert=$cert.Thumbprint;Save-State
-    $keyName=$cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName
+    $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+    try { $keyName=$rsa.CspKeyContainerInfo.UniqueKeyContainerName } finally { if ($rsa) { $rsa.Dispose() } }
     if (!$keyName) { throw 'The fixture certificate has no CSP private-key container.' }
     $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\RSA\MachineKeys\'+$keyName)
     if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The fixture private-key file is missing.' }
