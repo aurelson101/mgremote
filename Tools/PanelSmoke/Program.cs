@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Windows.Forms;
@@ -24,6 +25,24 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        Exception failure = null;
+        Application.Idle += Check;
+        Application.Run();
+        if (failure != null) throw new InvalidOperationException("Panel startup verification failed.", failure);
+        void Check(object sender, EventArgs e)
+        {
+            Application.Idle -= Check;
+            try { RunChecks(payload); }
+            catch (Exception ex) { failure = ex; }
+            finally {
+                try { foreach (Form form in Application.OpenForms.Cast<Form>().Reverse().ToArray()) form.Dispose(); }
+                catch (Exception ex) { failure ??= ex; }
+                Application.ExitThread();
+            }
+        }
+    }
+    private static void RunChecks(string payload)
+    {
         var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(payload, "MGRemote.dll"));
         var runtime = assembly.GetType("mRemoteNG.App.Runtime", true);
         var windows = runtime.GetProperty("WindowList");
@@ -48,7 +67,6 @@ internal static class Program
             if (panel.GetType().GetProperty("DockState").GetValue(panel).ToString() != "Document") throw new InvalidOperationException("The connection panel was not docked.");
         Console.WriteLine("PASS: fresh-runtime General and second connection panels dock correctly and remain tracked.");
         Console.Out.Flush();
-        // This host tests startup without running the real application's shutdown/save handlers.
-        Environment.Exit(0);
+
     }
 }

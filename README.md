@@ -37,7 +37,7 @@ Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly request
 
 These are unsigned development releases. Antivirus results describe a particular local scan, not a guarantee against all detections or SmartScreen warnings. No antivirus exclusions or certificate-validation bypasses are required or recommended.
 
-Windows validation includes targeted security checks, synthetic XML/RDP imports, GUI lifecycle checks, actual offline RDP ActiveX redirection settings, ConPTY terminal rendering and input, context-menu lifecycle, owned-process cleanup and MSI table/maintenance checks. The release includes its Sophos scan result.
+Windows validation includes targeted security checks, synthetic XML/RDP imports, GUI lifecycle checks, actual offline RDP ActiveX redirection settings, ConPTY terminal rendering and input, context-menu lifecycle, owned-process cleanup and MSI table/maintenance checks. Scan results apply only to the particular release containing them; this build has no Sophos validation.
 
 
 Review covers maintained connection, import, persistence, terminal and lifecycle paths, plus compilation and dependency checks; it is not a claim that all upstream and third-party code is defect-free.
