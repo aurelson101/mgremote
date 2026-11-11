@@ -126,7 +126,10 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress @('127.0.0.1','::1') | Out-Null
     $cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
     $state.Cert=$cert.Thumbprint;Save-State
-    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\RSA\MachineKeys\'+$cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName)
+    $keyName=$cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName
+    if (!$keyName) { throw 'The fixture certificate has no CSP private-key container.' }
+    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\RSA\MachineKeys\'+$keyName)
+    if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The fixture private-key file is missing.' }
     $keyAcl=Get-Acl $keyFile;$keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'));Set-Acl $keyFile $keyAcl
     $store=[Security.Cryptography.X509Certificates.X509Store]::new('Root','CurrentUser');$store.Open('ReadWrite');$store.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData));$store.Close()
     $state.RdpChanged=$true;Save-State
