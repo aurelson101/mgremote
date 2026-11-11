@@ -8,7 +8,9 @@ $installer = New-Object -ComObject WindowsInstaller.Installer
 $db = $installer.OpenDatabase($PackagePath, 0)
 function Property([string]$name) {
     $view = $db.OpenView('SELECT `Value` FROM `Property` WHERE `Property` = ''' + $name + '''')
-    $view.Execute(); $record = $view.Fetch(); $value = $record.StringData(1); $view.Close(); return $value
+    $null = $view.Execute(); $record = $view.Fetch()
+    $value = if ($null -ne $record) { $record.StringData(1) } else { $null }
+    $null = $view.Close(); return $value
 }
 if ((Property 'ProductName') -ne 'MGRemote (Preview)' -or (Property 'UpgradeCode') -ne '{B2E9F552-D411-4719-A829-164CE19B58A0}') { throw 'Unexpected package identity.' }
 $productCode = Property 'ProductCode'
