@@ -275,7 +275,12 @@ internal static class Program
                 groupType.GetProperty("ServerReady").SetValue(group, false);
                 worker = Task.Run(() => poll.Invoke(rdp, new object[] { null, null }));
                 Check(worker.Wait(TimeSpan.FromSeconds(5)), "Second reconnect probe blocked.");
-                rdp.GetType().GetMethod("Close").Invoke(rdp, null); Application.DoEvents();
+                while (listener.Pending()) { using var accepted = listener.AcceptSocket(); }
+                rdp.GetType().GetMethod("Close").Invoke(rdp, null);
+                worker = Task.Run(() => poll.Invoke(rdp, new object[] { null, null }));
+                Check(worker.Wait(TimeSpan.FromSeconds(5)), "Late timer callback blocked after close.");
+                Check(!listener.Pending(), "A late timer callback probed the network after close.");
+                Application.DoEvents();
                 Check(!(bool)groupType.GetProperty("ServerReady").GetValue(group), "A queued reconnect modified a closed session.");
             }
 

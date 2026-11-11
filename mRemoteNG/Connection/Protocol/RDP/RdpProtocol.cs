@@ -40,7 +40,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
         protected readonly FrmMain _frmMain = FrmMain.Default;
         protected bool loginComplete;
         private bool _alertOnIdleDisconnect;
-        private int _reconnectCheck, _reconnectGeneration;
+        private int _reconnectCheck, _reconnectGeneration, _closing;
         protected uint DesktopScaleFactor => (uint)(_displayProperties.ResolutionScalingFactor.Width * 100);
         protected readonly uint DeviceScaleFactor = 100;
         protected readonly uint Orientation = 0;
@@ -203,6 +203,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         public override bool Connect()
         {
+            Volatile.Write(ref _closing, 0);
             Interlocked.Increment(ref _reconnectGeneration);
             loginComplete = false;
             SetEventHandlers();
@@ -237,6 +238,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         public override void Close()
         {
+            Volatile.Write(ref _closing, 1);
             Interlocked.Increment(ref _reconnectGeneration);
             try
             {
@@ -1076,14 +1078,14 @@ namespace mRemoteNG.Connection.Protocol.RDP
             var owner = Control;
             var group = ReconnectGroup;
             int generation = Volatile.Read(ref _reconnectGeneration);
-            if (owner == null || owner.IsDisposed || !owner.IsHandleCreated || group == null || group.IsDisposed ||
+            if (Volatile.Read(ref _closing) != 0 || owner == null || owner.IsDisposed || !owner.IsHandleCreated || group == null || group.IsDisposed ||
                 Interlocked.CompareExchange(ref _reconnectCheck, 1, 0) != 0) return;
             try
             {
                 bool ready = PortScanner.IsPortOpen(connectionInfo.Hostname, Convert.ToString(connectionInfo.Port));
                 if (generation != Volatile.Read(ref _reconnectGeneration) || owner.IsDisposed || !owner.IsHandleCreated) return;
                 owner.BeginInvoke(new Action(() => {
-                    if (generation != Volatile.Read(ref _reconnectGeneration) || owner.IsDisposed || owner.Disposing ||
+                    if (Volatile.Read(ref _closing) != 0 || generation != Volatile.Read(ref _reconnectGeneration) || owner.IsDisposed || owner.Disposing ||
                         !ReferenceEquals(group, ReconnectGroup) || group.IsDisposed) return;
                     try {
                         group.ServerReady = ready;

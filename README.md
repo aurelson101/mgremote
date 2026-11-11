@@ -10,6 +10,12 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 
 Download the Windows MSI from the release. SHA-256 manifests, validation reports and the corresponding source archive accompany the installer.
 
+## Interface
+
+![MGRemote on Windows: connection tree and configuration editor](docs/images/windows-overview.png)
+
+Actual Windows interface captured during GUI validation with synthetic data. No live remote session is shown.
+
 ## Windows edition
 
 - Tabbed RDP, SSH and VNC connections, with a separate connection-properties panel.
@@ -33,11 +39,17 @@ msiexec /x "MGRemote-0.1.17-win-x64-preview.msi" /qn /norestart
 
 Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly requests cleanup of app-owned data for the current interactive user. It does not erase operating-system or antivirus records, other users' profiles, documents or personal SSH keys. See [Windows implementation notes](MGREMOTE-WINDOWS.md).
 
+## RDP certificate warnings and recovery
+
+Strict certificate validation remains the default. To review and explicitly accept a server certificate, select **Warn if authentication fails** in the connection's authentication settings. Verify the certificate before confirming; CredSSP/NLA stays enabled.
+
+Automatic reconnect checks the configured endpoint in the background and updates ActiveX on the Windows UI thread. Closing the session stops its timer and invalidates pending results. Normal disconnections do not start an automatic reconnect loop. Pre-login errors include disconnect codes instead of silently closing the session.
+
 ## Security and validation status
 
 These are unsigned development releases. Antivirus results describe a particular local scan, not a guarantee against all detections or SmartScreen warnings. No antivirus exclusions or certificate-validation bypasses are required or recommended.
 
-Windows validation includes targeted security checks, synthetic XML/RDP imports, GUI lifecycle checks, actual offline RDP ActiveX redirection settings, ConPTY terminal rendering and input, context-menu lifecycle, owned-process cleanup and MSI table/maintenance checks. Scan results apply only to the particular release containing them; this build has no Sophos validation.
+Windows validation includes targeted security checks, synthetic XML/RDP imports, GUI lifecycle checks, actual offline RDP ActiveX certificate/redirection settings, reconnect UI dispatch and cancellation using a loopback TCP fixture, ConPTY terminal rendering and input, context-menu lifecycle, owned-process cleanup and MSI table/maintenance checks. Scan results apply only to the particular release containing them; this build has no Sophos validation.
 
 
 Review covers maintained connection, import, persistence, terminal and lifecycle paths, plus compilation and dependency checks; it is not a claim that all upstream and third-party code is defect-free.
