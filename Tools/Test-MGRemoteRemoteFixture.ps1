@@ -125,12 +125,12 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     $block='MGRemoteBlock-'+$id;$allow='MGRemoteLoopback-'+$id;$state.Firewall=@($block,$allow);Save-State
     New-NetFirewallRule -Name $block -DisplayName $block -Direction Inbound -Action Block -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff') | Out-Null
     New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress '127.0.0.1' | Out-Null
-    $cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
+    $cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
     $state.Cert=$cert.Thumbprint;Save-State
     $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-    try { $keyName=$rsa.CspKeyContainerInfo.UniqueKeyContainerName } finally { if ($rsa) { $rsa.Dispose() } }
-    if (!$keyName) { throw 'The fixture certificate has no CSP private-key container.' }
-    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\RSA\MachineKeys\'+$keyName)
+    try { $keyName=$rsa.Key.UniqueName } finally { if ($rsa) { $rsa.Dispose() } }
+    if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'The fixture certificate has no valid CNG private-key container.' }
+    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\Keys\'+$keyName)
     if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The fixture private-key file is missing.' }
     $keyAcl=Get-Acl $keyFile;$keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'));Set-Acl $keyFile $keyAcl
     $store=[Security.Cryptography.X509Certificates.X509Store]::new('Root','CurrentUser');$store.Open('ReadWrite');$store.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData));$store.Close()
