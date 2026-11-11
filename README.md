@@ -6,7 +6,7 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 
 | Platform | Current package | Status |
 | --- | --- | --- |
-| Windows x64 | [MSI 0.1.17](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.17) | Unsigned preview |
+| Windows x64 | [MSI 0.1.18](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.18) | Unsigned preview |
 
 Download the Windows MSI from the release. SHA-256 manifests, validation reports and the corresponding source archive accompany the installer.
 
@@ -33,8 +33,8 @@ Install the MSI normally. Windows OpenSSH Client and the Microsoft Edge WebView2
 Silent installation and removal use standard Windows Installer commands:
 
 ```powershell
-msiexec /i "MGRemote-0.1.17-win-x64-preview.msi" /qn /norestart
-msiexec /x "MGRemote-0.1.17-win-x64-preview.msi" /qn /norestart
+msiexec /i "MGRemote-0.1.18-win-x64-preview.msi" /qn /norestart
+msiexec /x "MGRemote-0.1.18-win-x64-preview.msi" /qn /norestart
 ```
 
 Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly requests cleanup of app-owned data for the current interactive user. It does not erase operating-system or antivirus records, other users' profiles, documents or personal SSH keys. See [Windows implementation notes](MGREMOTE-WINDOWS.md).
@@ -49,7 +49,7 @@ Automatic reconnect checks the configured endpoint in the background and updates
 
 SSH/ConPTY and serial sessions run input/output on background workers. Transfers await child processes asynchronously, and upload-tree validation runs off the UI thread. Input queues are bounded. The plain-text fallback console batches rendering every 33 ms and caps visible history at 200,000 characters. RDP ActiveX and Windows controls stay on the STA UI thread; reconnect probes run in the background with overlap prevention and close-time cancellation.
 
-ConPTY pipe reads remain synchronous on a background worker per active terminal. Large numbers of simultaneous sessions have not been load-tested; no all-core speedup or throughput guarantee is claimed.
+ConPTY pipe reads remain synchronous on a background worker per active terminal. The GUI test includes 16 simultaneous local ConPTY child processes, final-output checks, a GUI heartbeat and complete child cleanup. This is a bounded concurrency test, not a remote-server throughput guarantee.
 
 Build scripts support `x64` and `arm64`. The Windows workflow uses separate native runners and requires the matching architecture before running GUI/ActiveX and MSI checks. See the release assets and architecture-specific manifests for ARM64 availability and native test coverage. Physical ARM hardware and live remote servers require a pilot.
 
@@ -68,7 +68,7 @@ Review covers maintained connection, import, persistence, terminal and lifecycle
 
 Physical USB/serial adapters and real switch consoles remain untested. Serial transport tests cover ANSI/split UTF-8, input delivery and cleanup. SSH1 and Telnet remain disabled by default; serial access does not weaken SSH host-key or RDP certificate checks.
 
-Live RDP/SSH authentication, real remote file transfer, mixed-DPI/hot-plug monitors and clean-machine Windows installation/removal have not been validated in this project session. RDP through an SSH loopback tunnel may fail certificate-name checks; authentication is not weakened to hide that limitation. Live sessions require a pilot.
+Live RDP/SSH authentication, real remote file transfer, mixed-DPI/hot-plug monitors have not been validated on user infrastructure. A separate CI test installs, repairs and uninstalls the MSI on a disposable Windows runner without a previous MGRemote product, checks installed panel startup and preserves a synthetic user-data file. The runner includes development prerequisites and is not a pristine consumer OS. RDP through an SSH loopback tunnel may fail certificate-name checks; authentication is not weakened to hide that limitation. Live sessions require a pilot.
 
 Do not open a public issue containing passwords, private keys or unredacted connection XML. Keep your clients and operating system patched, and verify all first-use host keys and certificates.
 

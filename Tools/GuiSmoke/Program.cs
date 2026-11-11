@@ -60,6 +60,10 @@ internal static class Program
                 while ((count = stream.Read(buffer, 0, buffer.Length)) > 0) stream.Write(buffer, 0, count);
             }
         }
+        if (args.Length > 1 && args[0] == "load-fixture") {
+            for (int i = 0; i < 500; i++) Console.WriteLine(args[1] + "-" + i);
+            Console.Out.Flush(); return;
+        }
         string payload = Path.GetFullPath(args[0]);
         string artifacts = Path.GetFullPath(args[1]);
         string fixture = Path.Combine(artifacts, "gui-" + Guid.NewGuid().ToString("N"));
@@ -147,6 +151,8 @@ internal static class Program
                     sshCycles++;
                 }
                 await TestPlugins(fixture);
+                await TestConcurrentTerminals(artifacts);
+                await TestVirtualServers(host, artifacts);
                 var report = new { Result = "PASS", PanelsDisposed = 35, RetainedMeasuredPanels = retained, GdiObjectDelta = gdiDelta,
                     SshLayouts = sshCycles, NewConnectionDialogValidated = true, ConnectionEditorValidated = true, MultiScreenGeometryValidated = true,
                     TerminalChildCleanupValidated = true, SerialConsoleValidated = true, AnyDeskOptionalDialogValidated = true, IllegalCrossThreadChecks = true, PluginInitializationOnUiThread = true,
@@ -169,6 +175,121 @@ internal static class Program
             }
         };
         Application.Run(host);
+    }
+
+    private static async Task TestVirtualServers(Form host, string artifacts)
+    {
+        string file = Environment.GetEnvironmentVariable("MGREMOTE_REMOTE_FIXTURE");
+        if (string.IsNullOrEmpty(file)) return;
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file)); var lab = json.RootElement;
+        string marker = "MGREMOTESSH" + Guid.NewGuid().ToString("N");
+        var type = app.GetType("mRemoteNG.UI.Controls.SshTerminal", true);
+        var terminal = (Control)Activator.CreateInstance(type, true); terminal.Dock = DockStyle.Fill; host.Controls.Add(terminal); terminal.BringToFront();
+        try {
+            type.GetMethod("StartProcess").Invoke(terminal, new object[] { lab.GetProperty("Executable").GetString(), lab.GetProperty("Arguments").GetString() + " echo " + marker });
+            await ((Task)type.GetProperty("Ready").GetValue(terminal)).WaitAsync(TimeSpan.FromSeconds(20));
+            var deadline = DateTime.UtcNow.AddSeconds(30); bool received = false;
+            while (!received && DateTime.UtcNow < deadline) {
+                dynamic view = type.GetField("_view", Fields).GetValue(terminal);
+                if (view.CoreWebView2 != null) {
+                    string text = await (Task<string>)view.ExecuteScriptAsync("typeof term==='undefined'?'':Array.from({length:term.buffer.active.length},(_,i)=>term.buffer.active.getLine(i).translateToString(true)).join('\\n')");
+                    received = text.Contains(marker);
+                }
+                if (!received) await Task.Delay(100);
+            }
+            Check(received, "The application SSH terminal did not authenticate and display the loopback server output.");
+        } finally { terminal.Dispose(); await ((Task)type.GetProperty("ShutdownCompletion").GetValue(terminal)).WaitAsync(TimeSpan.FromSeconds(15)); }
+        string root = lab.GetProperty("Root").GetString(); string source = Path.Combine(root, "binary.bin"), downloaded = Path.Combine(root, "downloaded.bin");
+        byte[] bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32768); File.WriteAllBytes(source, bytes);
+        string endpoint = lab.GetProperty("User").GetString() + "@127.0.0.1:" + lab.GetProperty("RemotePath").GetString();
+        async Task<int> Scp(string from, string to) {
+            var start = new ProcessStartInfo(lab.GetProperty("ScpExecutable").GetString()) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (string arg in new[] { "-F", Path.Combine(root,"client.conf"), "-i", Path.Combine(root,"client"), "-P", lab.GetProperty("SshPort").GetInt32().ToString(), "--", from, to }) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start); var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
+            try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(25)); await Task.WhenAll(output,error); return process.ExitCode; }
+            finally { if (!process.HasExited) process.Kill(true); }
+        }
+        Check(await Scp(source, endpoint + "/binary.bin") == 0, "Loopback SFTP upload failed.");
+        Check(await Scp(endpoint + "/binary.bin", downloaded) == 0 && File.ReadAllBytes(downloaded).SequenceEqual(bytes), "Loopback SFTP binary round trip failed.");
+        Check(await Scp(source, endpoint + "/missing-parent/output.bin") != 0, "Loopback SFTP error was reported as success.");
+        bool rdp = lab.GetProperty("RdpAvailable").GetBoolean();
+        if (rdp) await TestVirtualRdp(host, lab);
+        File.WriteAllText(Path.Combine(artifacts,"network-verification.json"), System.Text.Json.JsonSerializer.Serialize(new {
+            Result="PASS", ApplicationSshTerminalAuthenticated=true, LoopbackSftpBinaryRoundTrip=true, FailedTransferRejected=true,
+            WindowsServerRdpDesktopLogin=rdp, RdpScope=rdp ? "Isolated Windows Server loopback, NLA and trusted localhost test certificate" : "Client Windows single-session image; RDP settings tested offline",
+            ProductionEndpointsModified=false
+        },new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
+        Console.WriteLine("PASS: application SSH terminal, pinned host key, real loopback SFTP binary round trip and transfer error; Windows Server RDP desktop=" + rdp);
+    }
+    private static async Task TestVirtualRdp(Form host, System.Text.Json.JsonElement lab)
+    {
+        var modelType = app.GetType("mRemoteNG.Connection.ConnectionInfo",true); var model = Activator.CreateInstance(modelType);
+        modelType.GetProperty("Protocol").SetValue(model,Enum.Parse(modelType.GetProperty("Protocol").PropertyType,"RDP"));
+        modelType.GetProperty("Name").SetValue(model,"Isolated RDP fixture"); modelType.GetProperty("Hostname").SetValue(model,"localhost");
+        modelType.GetProperty("Port").SetValue(model,lab.GetProperty("RdpPort").GetInt32());
+        modelType.GetProperty("Username").SetValue(model,lab.GetProperty("User").GetString());
+        modelType.GetProperty("Domain").SetValue(model,lab.GetProperty("RdpDomain").GetString());
+        modelType.GetProperty("Password").SetValue(model,lab.GetProperty("RdpPassword").GetString());
+        modelType.GetProperty("RDPAuthenticationLevel").SetValue(model,Enum.ToObject(modelType.GetProperty("RDPAuthenticationLevel").PropertyType,1));
+        modelType.GetProperty("UseCredSsp").SetValue(model,true);
+        modelType.GetProperty("UseConsoleSession").SetValue(model,true);
+        modelType.GetProperty("ExternalCredentialProvider").SetValue(model,Enum.Parse(modelType.GetProperty("ExternalCredentialProvider").PropertyType,"None"));
+        modelType.GetProperty("RDGatewayUsageMethod").SetValue(model,Enum.Parse(modelType.GetProperty("RDGatewayUsageMethod").PropertyType,"Never"));
+        var inheritance=modelType.GetProperty("Inheritance").GetValue(model); inheritance.GetType().GetProperty("EverythingInherited").SetValue(inheritance,false);
+        object rdp=Activator.CreateInstance(app.GetType("mRemoteNG.Connection.Protocol.RDP.RdpProtocol10",true));
+        var rdpBase=app.GetType("mRemoteNG.Connection.Protocol.RDP.RdpProtocol",true);
+        using var container=new Panel { Parent=host, Dock=DockStyle.Fill }; container.BringToFront();
+        var bridge=(Control)Activator.CreateInstance(app.GetType("mRemoteNG.Connection.InterfaceControl",true),new object[]{container,rdp,model});
+        bridge.GetType().GetProperty("OriginalInfo").SetValue(bridge,model);rdp.GetType().GetProperty("InterfaceControl").SetValue(rdp,bridge);
+        string failure=null;
+        Action<object,string,int?> disconnected=(_,message,code)=>{ failure="RDP fixture disconnected: "+code+" "+message;rdpBase.GetField("loginComplete",Fields).SetValue(rdp,true); };
+        var evt=rdp.GetType().GetEvent("Disconnected");evt.AddEventHandler(rdp,Delegate.CreateDelegate(evt.EventHandlerType,disconnected.Target,disconnected.Method));
+        try {
+            Check((bool)rdp.GetType().GetMethod("Initialize").Invoke(rdp,null),"Virtual RDP control did not initialize.");
+            Check((bool)rdp.GetType().GetMethod("Connect").Invoke(rdp,null),"Virtual RDP connection did not start.");
+            var deadline=DateTime.UtcNow.AddSeconds(90);
+            while (!(bool)rdpBase.GetField("loginComplete",Fields).GetValue(rdp) && failure==null && DateTime.UtcNow<deadline) await Task.Delay(100);
+            Check(failure==null && (bool)rdpBase.GetField("loginComplete",Fields).GetValue(rdp),failure??"Virtual RDP desktop logon timed out.");
+        } finally { rdp.GetType().GetMethod("Close").Invoke(rdp,null);((IDisposable)rdp).Dispose();modelType.GetProperty("Password").SetValue(model,""); }
+    }
+
+    private static async Task TestConcurrentTerminals(string artifacts)
+    {
+        const int count = 16;
+        var type = app.GetType("mRemoteNG.UI.Controls.PseudoTerminal", true);
+        var sessions = new List<object>(); var outputs = new List<System.Text.StringBuilder>();
+        var ids = new List<int>(); var markers = new List<string>();
+        int ticks = 0; using var heartbeat = new System.Windows.Forms.Timer { Interval = 50 };
+        heartbeat.Tick += (_, _) => ticks++; heartbeat.Start(); var elapsed = Stopwatch.StartNew();
+        try {
+            for (int i = 0; i < count; i++) {
+                var session = Activator.CreateInstance(type, true); sessions.Add(session);
+                var output = new System.Text.StringBuilder(); outputs.Add(output);
+                string marker = "MGREMOTELOAD" + Guid.NewGuid().ToString("N"); markers.Add(marker);
+                Func<string, Task> display = text => { lock (output) { if (output.Length > 2000000) throw new Exception("Load fixture output exceeded its bound."); output.Append(text); } return Task.CompletedTask; };
+                type.GetMethod("Start").Invoke(session, new object[] { Environment.ProcessPath, "load-fixture " + marker, display });
+                ids.Add((int)type.GetProperty("ProcessId").GetValue(session));
+                await Task.Delay(10);
+            }
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            bool Complete() => outputs.Select((o, i) => { lock (o) return o.ToString().Contains(markers[i] + "-499"); }).All(v => v);
+            while (!Complete() && DateTime.UtcNow < deadline) await Task.Delay(50);
+            Check(Complete(), "Concurrent ConPTY sessions lost their final output or stalled.");
+            Check(ticks >= 2, "The GUI message loop did not run during concurrent sessions.");
+        } finally {
+            foreach (var session in sessions) ((IDisposable)session).Dispose();
+            await Task.WhenAll(sessions.Select(s => (Task)type.GetProperty("ShutdownCompletion").GetValue(s))).WaitAsync(TimeSpan.FromSeconds(30));
+            heartbeat.Stop();
+        }
+        foreach (int id in ids) {
+            bool alive; try { using var process = Process.GetProcessById(id); alive = !process.HasExited; } catch (ArgumentException) { alive = false; }
+            Check(!alive, "Concurrent terminal cleanup left a child process.");
+        }
+        File.WriteAllText(Path.Combine(artifacts, "concurrency-verification.json"), System.Text.Json.JsonSerializer.Serialize(new {
+            Result = "PASS", Sessions = count, UiHeartbeatTicks = ticks, ElapsedMilliseconds = elapsed.ElapsedMilliseconds,
+            FinalOutputVerified = true, OwnedProcessesTerminated = true, Scope = "Local native ConPTY processes; not remote servers or a production throughput benchmark"
+        }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine("PASS: 16 concurrent native ConPTY processes, final output, live GUI heartbeat and child cleanup.");
     }
 
     private static async Task TestSerialConsole(string artifacts)
