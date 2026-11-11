@@ -45,6 +45,18 @@ Strict certificate validation remains the default. To review and explicitly acce
 
 Automatic reconnect checks the configured endpoint in the background and updates ActiveX on the Windows UI thread. Closing the session stops its timer and invalidates pending results. Normal disconnections do not start an automatic reconnect loop. Pre-login errors include disconnect codes instead of silently closing the session.
 
+## Concurrency and ARM64
+
+SSH/ConPTY and serial sessions run input/output on background workers. Transfers await child processes asynchronously, and upload-tree validation runs off the UI thread. Input queues are bounded. The plain-text fallback console batches rendering every 33 ms and caps visible history at 200,000 characters. RDP ActiveX and Windows controls stay on the STA UI thread; reconnect probes run in the background with overlap prevention and close-time cancellation.
+
+ConPTY pipe reads remain synchronous on a background worker per active terminal. Large numbers of simultaneous sessions have not been load-tested; no all-core speedup or throughput guarantee is claimed.
+
+Build scripts support `x64` and `arm64`. The Windows workflow uses separate native runners and requires the matching architecture before running GUI/ActiveX and MSI checks. See the release assets and architecture-specific manifests for ARM64 availability and native test coverage. Physical ARM hardware and live remote servers require a pilot.
+
+```powershell
+./Tools/Build-MGRemotePackage.ps1 -Platform arm64
+```
+
 ## Security and validation status
 
 These are unsigned development releases. Antivirus results describe a particular local scan, not a guarantee against all detections or SmartScreen warnings. No antivirus exclusions or certificate-validation bypasses are required or recommended.

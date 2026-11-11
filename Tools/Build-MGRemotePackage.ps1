@@ -91,6 +91,8 @@ $manifest = [ordered]@{
     Preview=$true; InstallerSigned=[bool]$CertificateThumbprint; ExecutableSigned=[bool]$CertificateThumbprint; BuiltUtc=[DateTime]::UtcNow.ToString('o')
     Installer=(Split-Path $installer -Leaf); InstallerSHA256=(Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
     Source=(Split-Path $sourceArchive -Leaf); SourceSHA256=(Get-FileHash -LiteralPath $sourceArchive -Algorithm SHA256).Hash
+    BuildProcessArchitecture=[Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+    NativeGuiTestsRun=([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant() -eq $Platform)
     LiveRdpSshValidated=$false
 }
 $manifestPath = Join-Path $releaseDirectory "MGRemote-$Version-win-$Platform-manifest.json"
