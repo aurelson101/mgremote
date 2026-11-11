@@ -15,10 +15,10 @@ namespace mRemoteNG.Security
 
         public static void ValidateRdp(int authenticationLevel, bool useCredSsp)
         {
-            if (authenticationLevel != 1 || !useCredSsp)
+            if ((authenticationLevel != 1 && authenticationLevel != 2) || !useCredSsp)
                 throw new InvalidOperationException(
                     "MGRemote requires RDP server authentication and NLA. Set Authentication to " +
-                    "'Do not connect if authentication fails' and enable CredSSP in this connection or its parent folder.");
+                    "'Do not connect if authentication fails' or 'Warn if authentication fails', and enable CredSSP in this connection or its parent folder.");
         }
 
         public static string BuildSshArguments(string rawHostname, string rawUsername, int port)

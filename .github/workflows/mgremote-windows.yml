@@ -1,0 +1,25 @@
+name: MGRemote Windows MSI
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.x
+      - name: Build and validate Windows MSI
+        shell: pwsh
+        run: ./Tools/Build-MGRemotePackage.ps1 -Platform x64 -Version 0.1.16
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: mgremote-windows-0.1.16
+          path: |
+            artifacts/installers/0.1.16/**/*
+            artifacts/*verification.json
+          if-no-files-found: warn

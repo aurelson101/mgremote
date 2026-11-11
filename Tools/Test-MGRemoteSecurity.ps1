@@ -15,7 +15,10 @@ function Assert-Rejected([scriptblock]$Action, [string]$Name) {
 }
 [mRemoteNG.Security.WindowsSecurityPolicy]::ValidateRdp(1, $true)
 Assert-True $true 'RDP valid policy accepted'
-foreach ($level in @(0, 2, 99)) {
+[mRemoteNG.Security.WindowsSecurityPolicy]::ValidateRdp(2, $true)
+Assert-True $true 'RDP explicit certificate confirmation accepted'
+Assert-Rejected { [mRemoteNG.Security.WindowsSecurityPolicy]::ValidateRdp(2, $false) } 'RDP warning mode still requires NLA'
+foreach ($level in @(0, 99)) {
     Assert-Rejected { [mRemoteNG.Security.WindowsSecurityPolicy]::ValidateRdp($level, $true) } "RDP authentication $level refused"
 }
 Assert-Rejected { [mRemoteNG.Security.WindowsSecurityPolicy]::ValidateRdp(1, $false) } 'RDP without NLA refused'

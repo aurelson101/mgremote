@@ -909,8 +909,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private void SetAuthenticationLevel()
         {
-            // Fail initialization if the control cannot enforce server authentication.
-            _rdpClient.AdvancedSettings5.AuthenticationLevel = (uint)AuthenticationLevel.AuthRequired;
+            // Warning mode requires explicit acceptance in the native certificate dialog.
+            // Legacy NoAuth and unknown values retain strict server validation.
+            _rdpClient.AdvancedSettings5.AuthenticationLevel = (uint)(connectionInfo.RDPAuthenticationLevel == AuthenticationLevel.WarnOnFailedAuth
+                ? AuthenticationLevel.WarnOnFailedAuth : AuthenticationLevel.AuthRequired);
         }
 
         private void SetLoadBalanceInfo()
@@ -965,16 +967,23 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private void RDPEvent_OnFatalError(int errorCode)
         {
             string errorMsg = RdpErrorCodes.GetError(errorCode);
+            Runtime.MessageCollector.AddMessage(MessageClass.ErrorMsg, $"RDP fatal error: {errorCode} (0x{errorCode:X}): {errorMsg}");
             Event_ErrorOccured(this, errorMsg, errorCode);
         }
 
         private void RDPEvent_OnDisconnected(int discReason)
         {
             const int UI_ERR_NORMAL_DISCONNECT = 0xB08;
+            Runtime.MessageCollector.AddMessage(MessageClass.DebugMsg, $"RDP disconnected: reason={discReason} (0x{discReason:X}), extended={_rdpClient.ExtendedDisconnectReason}, loginComplete={loginComplete}");
             if (discReason != UI_ERR_NORMAL_DISCONNECT)
             {
                 string reason = _rdpClient.GetErrorDescription((uint)discReason, (uint)_rdpClient.ExtendedDisconnectReason);
                 Event_Disconnected(this, reason, discReason);
+                if (!loginComplete && discReason != 1 && discReason != 2)
+                    MessageBox.Show(Control, "La connexion RDP s’est arrêtée avant l’ouverture du bureau.\n\n" + reason +
+                        $"\nCode : {discReason} (0x{discReason:X}) / {_rdpClient.ExtendedDisconnectReason}\n\n" +
+                        "Pour confirmer manuellement un certificat, choisissez « Avertir si l’authentification échoue » dans le profil RDP. Vérifiez le certificat présenté. CredSSP/NLA reste requis.",
+                        "Connexion RDP interrompue", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
 
             if (Properties.OptionsAdvancedPage.Default.ReconnectOnDisconnect)
@@ -995,6 +1004,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private void RDPEvent_OnConnecting()
         {
+            loginComplete = false;
+            Runtime.MessageCollector.AddMessage(MessageClass.DebugMsg, $"RDP connecting: authentication={_rdpClient.AdvancedSettings5.AuthenticationLevel}, NLA={_rdpClient.AdvancedSettings7.EnableCredSspSupport}");
             Event_Connecting(this);
         }
 
@@ -1006,6 +1017,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private void RDPEvent_OnLoginComplete()
         {
             loginComplete = true;
+            Runtime.MessageCollector.AddMessage(MessageClass.DebugMsg, "RDP login completed.");
         }
 
         private void RDPEvent_OnLeaveFullscreenMode()
