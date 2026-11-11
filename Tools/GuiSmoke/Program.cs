@@ -85,7 +85,7 @@ internal static class Program
             loggerType.GetMethod("LogSystemData", Fields).Invoke(logger, null);
             timer.Stop();
             Console.WriteLine("Startup system diagnostics elapsed ms: " + timer.Elapsed.TotalMilliseconds.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
-            Environment.Exit(0);
+            return;
         }
         var mainType = app.GetType("mRemoteNG.UI.Forms.FrmMain", true);
         var main = (Form)mainType.GetProperty("Default").GetValue(null);
@@ -157,9 +157,16 @@ internal static class Program
                 File.WriteAllText(Path.Combine(artifacts, "gui-verification.json"), json);
                 Console.WriteLine(json);
                 Console.Out.Flush();
-                Environment.Exit(0); // No real application's close/save handlers are invoked.
+                Environment.ExitCode = 0;
             }
-            catch (Exception ex) { Console.Error.WriteLine(ex); Console.Error.Flush(); Environment.Exit(1); }
+            catch (Exception ex) { Console.Error.WriteLine(ex); Console.Error.Flush(); Environment.ExitCode = 1; }
+            finally {
+                try {
+                    main.Dispose();
+                    foreach (Form form in Application.OpenForms.Cast<Form>().Reverse().ToArray()) form.Dispose();
+                } catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                Application.ExitThread();
+            }
         };
         Application.Run(host);
     }

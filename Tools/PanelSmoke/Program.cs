@@ -9,6 +9,7 @@ using System.Windows.Forms;
 
 internal static class Program
 {
+    private static Form main;
     [STAThread]
     private static void Main(string[] args)
     {
@@ -35,7 +36,7 @@ internal static class Program
             try { RunChecks(payload); }
             catch (Exception ex) { failure = ex; }
             finally {
-                try { foreach (Form form in Application.OpenForms.Cast<Form>().Reverse().ToArray()) form.Dispose(); }
+                try { main?.Dispose(); foreach (Form form in Application.OpenForms.Cast<Form>().Reverse().ToArray()) form.Dispose(); }
                 catch (Exception ex) { failure ??= ex; }
                 Application.ExitThread();
             }
@@ -44,6 +45,7 @@ internal static class Program
     private static void RunChecks(string payload)
     {
         var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(payload, "MGRemote.dll"));
+        main = (Form)assembly.GetType("mRemoteNG.UI.Forms.FrmMain", true).GetProperty("Default").GetValue(null);
         var runtime = assembly.GetType("mRemoteNG.App.Runtime", true);
         var windows = runtime.GetProperty("WindowList");
         object originalList = windows.GetValue(null) ?? throw new InvalidOperationException("WindowList is null before the startup layout.");
