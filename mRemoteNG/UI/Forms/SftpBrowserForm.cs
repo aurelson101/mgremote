@@ -44,6 +44,8 @@ internal sealed class SshFileTransferForm : Form
     private bool _working, _queueRunning, _closing, _allowClose;
     private int _localGeneration;
     private RemoteSelection _copiedRemote;
+    private RemoteSelection _draggedRemote;
+    private readonly string _dragToken = Guid.NewGuid().ToString("N");
 
     public SshFileTransferForm(ConnectionInfo connection)
     {
@@ -74,7 +76,13 @@ internal sealed class SshFileTransferForm : Form
         _download.Click += (_, _) => Enqueue(Selected(_remote), _localPath.Text, false);
         _cancel.Click += (_, _) => CancelTransfers();
         _local.ItemDrag += (_, _) => { var files = Selected(_local); if (files.Length > 0) { var data = new DataObject(); data.SetData(DataFormats.FileDrop, files); _local.DoDragDrop(data, DragDropEffects.Copy); } };
-        _remote.ItemDrag += (_, _) => { var files = Selected(_remote); if (files.Length > 0) { var data = new DataObject(); data.SetData(RemoteFormat, false, new RemoteSelection(this, files)); _remote.DoDragDrop(data, DragDropEffects.Copy); } };
+        _remote.ItemDrag += (_, _) => {
+            var files = Selected(_remote); if (files.Length == 0) return;
+            _draggedRemote = new RemoteSelection(this, files);
+            using var token = new MemoryStream(Encoding.ASCII.GetBytes(_dragToken));
+            var data = new DataObject(); data.SetData(RemoteFormat, false, token);
+            try { _remote.DoDragDrop(data, DragDropEffects.Copy); } finally { _draggedRemote = null; }
+        };
         void RemoteEffect(DragEventArgs e) => e.Effect = _session != null && !_working && e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
         void LocalEffect(DragEventArgs e) => e.Effect = RemoteData(e.Data) != null && !_working ? DragDropEffects.Copy : DragDropEffects.None;
         _remote.DragEnter += (_, e) => RemoteEffect(e); _remote.DragOver += (_, e) => RemoteEffect(e);
@@ -149,7 +157,11 @@ internal sealed class SshFileTransferForm : Form
         } finally { list.EndUpdate(); }
     }
     private static string[] Selected(ListView list) => list.SelectedItems.Cast<ListViewItem>().Select(x => x.Tag).OfType<SftpEntry>().Where(x => x.Name != "..").Select(x => x.Path).ToArray();
-    private RemoteSelection RemoteData(IDataObject data) => data?.GetDataPresent(RemoteFormat, false) == true && data.GetData(RemoteFormat, false) is RemoteSelection selection && selection.Owner == this ? selection : null;
+    private RemoteSelection RemoteData(IDataObject data)
+    {
+        if (_draggedRemote == null || data?.GetDataPresent(RemoteFormat, false) != true) return null;
+        return data.GetData(RemoteFormat, false) is MemoryStream { Length: <= 128 } bytes && Encoding.ASCII.GetString(bytes.ToArray()) == _dragToken ? _draggedRemote : null;
+    }
     private static string DropDirectory(ListView list, string fallback, DragEventArgs e) => list.GetItemAt(list.PointToClient(new Point(e.X, e.Y)).X, list.PointToClient(new Point(e.X, e.Y)).Y)?.Tag is SftpEntry { Directory: true, Link: false } folder ? folder.Path : fallback;
     private void Enqueue(string[] paths, string destination, bool upload)
     {

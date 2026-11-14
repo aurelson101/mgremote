@@ -270,7 +270,8 @@ internal static class Program
         browser.Controls.Find("TransferLocalPath",true)[0].Text=target;
         string[] remotePaths={remoteRoot.TrimEnd('/')+"/Lot été",remoteRoot.TrimEnd('/')+"/notes é.txt"};
         var selection=Activator.CreateInstance(formType.GetNestedType("RemoteSelection",BindingFlags.NonPublic),new object[]{browser,remotePaths});
-        var download=new DataObject();download.SetData("MGRemote.Sftp.Selection",false,selection);
+        formType.GetField("_draggedRemote",Fields).SetValue(browser,selection);
+        var download=new DataObject();download.SetData("MGRemote.Sftp.Selection",false,new MemoryStream(System.Text.Encoding.ASCII.GetBytes((string)formType.GetField("_dragToken",Fields).GetValue(browser))));
         onDrop.Invoke(local,new object[]{new DragEventArgs(download,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});
         await Drain(4,true);
         Check(File.ReadAllBytes(Path.Combine(target,"Lot été","sous dossier","binary.bin")).SequenceEqual(binary),"SFTP browser binary folder round trip differs.");
