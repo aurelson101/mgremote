@@ -298,7 +298,10 @@ namespace mRemoteNG.Connection.Protocol.VNC
             AuthVNC,
 
             [LocalizedAttributes.LocalizedDescription(nameof(Language.Windows))]
-            AuthWin
+            AuthWin,
+
+            [Description("Apple Remote Desktop (macOS account)")]
+            AppleARD
         }
 
         public enum ProxyType
