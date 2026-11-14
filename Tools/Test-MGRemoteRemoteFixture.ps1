@@ -126,8 +126,14 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     $block='MGRemoteBlock-'+$id;$allow='MGRemoteLoopback-'+$id;$state.Firewall=@($block,$allow);Save-State
     New-NetFirewallRule -Name $block -DisplayName $block -Direction Inbound -Action Block -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff') | Out-Null
     New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress '127.0.0.1' | Out-Null
-    $cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
-    $state.Cert=$cert.Thumbprint;Save-State
+    Write-Host 'Creating isolated RDP certificate in native Windows PowerShell.'
+    # Return only a thumbprint across Windows PowerShell compatibility, avoiding
+    # remoting serialization of a certificate's private key.
+    $thumbprint=& "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Command "(New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)).Thumbprint"
+    if ($LASTEXITCODE -ne 0 -or "$thumbprint" -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Isolated certificate creation failed.' }
+    $state.Cert="$thumbprint";Save-State
+    $cert=Get-Item ('Cert:\LocalMachine\My\'+$state.Cert)
+    Write-Host 'Granting the RDP service access to its isolated certificate key.'
     $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
     try { $keyName=$rsa.Key.UniqueName } finally { if ($rsa) { $rsa.Dispose() } }
     if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'The fixture certificate has no valid CNG private-key container.' }
