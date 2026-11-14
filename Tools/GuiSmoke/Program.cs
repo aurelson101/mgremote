@@ -837,7 +837,7 @@ internal static class Program
             var protocol = Field<ComboBox>(dialog, "Protocol");
             var host = Field<TextBox>(dialog, "Hostname");
             var create = Field<Button>(dialog, "CreateConnection");
-            Check(protocol.Items.Count == 3 && protocol.SelectedIndex == 0 && Field<NumericUpDown>(dialog, "Port").Value == 3389,
+            Check(protocol.Items.Count == 4 && protocol.SelectedIndex == 0 && Field<NumericUpDown>(dialog, "Port").Value == 3389,
                 "Creation dialog lacks explicit secure protocols/default RDP port.");
             create.PerformClick();
             Check(dialog.DialogResult != DialogResult.OK && Value(rdp, "Name") == "Unchanged", "Empty host committed a connection.");
@@ -898,6 +898,18 @@ internal static class Program
             Field<Button>(dialog, "CreateConnection").PerformClick();
             Check(dialog.DialogResult == DialogResult.OK && Value(vnc, "Protocol") == "VNC" && Value(vnc, "Port") == "5900" &&
                 Value(vnc, "SSHTunnelConnectionName") == "Synthetic SSH bastion", "VNC creation did not retain its selected SSH route.");
+        }
+        var mac = NewModel();
+        using (var dialog = Open(mac)) {
+            Field<ComboBox>(dialog, "Protocol").SelectedIndex = 3;
+            Field<TextBox>(dialog, "Hostname").Text = "simulated-mac.invalid";
+            Field<Button>(dialog, "CreateConnection").PerformClick();
+            Check(dialog.DialogResult != DialogResult.OK, "Apple connection accepted a missing Mac account/tunnel.");
+            Field<TextBox>(dialog, "Username").Text = "mac-user";
+            var tunnel = Field<ComboBox>(dialog, "SshTunnel"); tunnel.Items.Add("Mac SSH (simulation)"); tunnel.SelectedItem = "Mac SSH (simulation)";
+            using (var image = new Bitmap(dialog.Width, dialog.Height)) { dialog.DrawToBitmap(image, new Rectangle(Point.Empty, dialog.Size)); image.Save(Path.Combine(artifacts, "gui-apple-connection.png")); }
+            Field<Button>(dialog, "CreateConnection").PerformClick();
+            Check(dialog.DialogResult == DialogResult.OK && Value(mac, "Protocol") == "ARD" && Value(mac, "Port") == "5900" && Value(mac, "VNCAuthMode") == "AppleARD" && Value(mac, "Username") == "mac-user", "Apple connection did not retain native protocol/account authentication.");
         }
     }
 

@@ -82,7 +82,7 @@ internal sealed class NewConnectionForm : Form
         AddRow("Protocole", _protocol);
         AddRow("Serveur / adresse IP", _host);
         AddRow("Port", _port);
-        AddRow("Utilisateur (facultatif)", _user);
+        var userLabel = AddRow("Utilisateur (facultatif)", _user);
         AddRow("Domaine RDP (facultatif)", _domain);
         _tunnel.Items.Add("Aucun — connexion directe");
         if (mRemoteNG.App.Runtime.ConnectionsService.ConnectionTreeModel != null)
@@ -121,6 +121,7 @@ internal sealed class NewConnectionForm : Form
         };
         _protocol.SelectedIndexChanged += (_, _) => {
             bool ssh = _protocol.SelectedIndex == 1;
+            userLabel.Text = _protocol.SelectedIndex == 3 ? "Utilisateur macOS (obligatoire)" : "Utilisateur (facultatif)";
             int nextPort = ssh ? 22 : _protocol.SelectedIndex >= 2 ? 5900 : 3389;
             if (_port.Value == _defaultPort) _port.Value = nextPort;
             _defaultPort = nextPort;
