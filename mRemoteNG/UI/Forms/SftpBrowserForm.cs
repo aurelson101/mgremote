@@ -168,7 +168,7 @@ internal sealed class SshFileTransferForm : Form
         if (_session == null || _working) { _status.Text = "Connectez-vous et attendez la fin de la navigation avant de transférer."; return; }
         if (paths.Length == 0) { _status.Text = "Sélectionnez un ou plusieurs fichiers/dossiers."; return; }
         if (paths.Length + _queue.Items.Count > 10000) { _status.Text = "File d’attente pleine. Rouvrez la fenêtre après les transferts terminés."; return; }
-        foreach (string path in paths.Distinct(StringComparer.OrdinalIgnoreCase)) {
+        foreach (string path in paths.Distinct(upload ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)) {
             var row = new ListViewItem(new[] { upload ? "Envoi →" : "← Réception", upload ? Path.GetFileName(path) : path.Split('/').Last(), destination, "En attente" });
             _queue.Items.Add(row); _pending.Enqueue(new Job(path, destination, upload, _overwrite.Checked, row));
         }
