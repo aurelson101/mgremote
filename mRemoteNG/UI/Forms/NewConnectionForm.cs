@@ -138,6 +138,8 @@ internal sealed class NewConnectionForm : Form
                 : "Authentification du serveur et NLA/CredSSP activés, même via un tunnel. Le certificat RDP doit rester valide. Le mot de passe sera demandé à la connexion.";
         };
         _protocol.SelectedIndex = 0;
+        foreach (var field in new[] { _name, _host, _user, _domain, _identity }) field.TextChanged += (_, _) => _error.Text = string.Empty;
+        _tunnel.SelectedIndexChanged += (_, _) => _error.Text = string.Empty;
         _keys.Click += (_, _) => {
             using var profiles = new SshProfileForm(_identity.Text.Trim()); profiles.ShowDialog(this);
             if (profiles.CreatedAlias == null) return;
