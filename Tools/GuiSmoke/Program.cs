@@ -202,7 +202,7 @@ internal static class Program
             bridge.GetType().GetProperty("SSHTunnelInfo").SetValue(bridge, ssh);
             protocol.GetType().GetProperty("InterfaceControl").SetValue(protocol, bridge);
             Check((bool)protocol.GetType().GetMethod("Initialize").Invoke(protocol, null), "The native Apple desktop control did not initialize.");
-            object control = protocol.GetType().GetProperty("Control").GetValue(protocol);
+            object control = protocol.GetType().GetProperty("Control", Fields).GetValue(protocol);
             Check((string)control.GetType().GetProperty("AppleUsername").GetValue(control) == "mac-user", "The Apple account was not passed to the native desktop control.");
         } finally { ((IDisposable)protocol).Dispose(); }
     }
