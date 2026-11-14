@@ -127,19 +127,28 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     New-NetFirewallRule -Name $block -DisplayName $block -Direction Inbound -Action Block -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff') | Out-Null
     New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress '127.0.0.1' | Out-Null
     Write-Host 'Creating isolated RDP certificate in native Windows PowerShell.'
-    # Return only a thumbprint across Windows PowerShell compatibility, avoiding
-    # remoting serialization of a certificate's private key.
-    $thumbprint=& "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Command "(New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)).Thumbprint"
+    # Keep private-key creation/access in the native PKI runtime. Only the public
+    # thumbprint crosses into pwsh; no private-key object is remoted or serialized.
+    $certificateScript=Join-Path $root 'certificate.ps1'
+    @'
+$ErrorActionPreference='Stop'
+$cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
+try {
+    $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+    try { $keyName=$rsa.Key.UniqueName } finally { if ($rsa) { $rsa.Dispose() } }
+    if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'Invalid isolated CNG key container.' }
+    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\Keys\'+$keyName)
+    if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'Isolated key file missing.' }
+    $keyAcl=Get-Acl $keyFile
+    $keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'))
+    Set-Acl $keyFile $keyAcl
+    $cert.Thumbprint
+} catch { Remove-Item ('Cert:\LocalMachine\My\'+$cert.Thumbprint) -DeleteKey; throw }
+'@ | Set-Content -LiteralPath $certificateScript -Encoding UTF8
+    $thumbprint=& "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -File $certificateScript
     if ($LASTEXITCODE -ne 0 -or "$thumbprint" -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Isolated certificate creation failed.' }
     $state.Cert="$thumbprint";Save-State
     $cert=Get-Item ('Cert:\LocalMachine\My\'+$state.Cert)
-    Write-Host 'Granting the RDP service access to its isolated certificate key.'
-    $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-    try { $keyName=$rsa.Key.UniqueName } finally { if ($rsa) { $rsa.Dispose() } }
-    if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'The fixture certificate has no valid CNG private-key container.' }
-    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\Keys\'+$keyName)
-    if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The fixture private-key file is missing.' }
-    $keyAcl=Get-Acl $keyFile;$keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'));Set-Acl $keyFile $keyAcl
     $store=[Security.Cryptography.X509Certificates.X509Store]::new('Root','CurrentUser');$store.Open('ReadWrite');$store.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData));$store.Close()
     Write-Host 'Binding isolated RDP certificate.'
     $state.RdpChanged=$true;Save-State
