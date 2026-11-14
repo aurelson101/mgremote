@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Platforms>x64;arm64</Platforms>
@@ -147,7 +147,7 @@
     <PackageReference Include="Newtonsoft.Json" />
     <PackageReference Include="SSH.NET" />
     <PackageReference Include="System.Management" />
-    <PackageReference Include="VncSharpCore" />
+    <ProjectReference Include="..\External\VncSharp\VncSharpCore\VncSharpCore.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Language\Language.Designer.cs">

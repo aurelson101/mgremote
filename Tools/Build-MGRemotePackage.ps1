@@ -21,6 +21,8 @@ $payload = [IO.Path]::GetFullPath($build.OutputDirectory)
 if ([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant() -eq $Platform) {
     & dotnet run --project (Join-Path $root 'Tools/PanelSmoke/PanelSmoke.csproj') -- $payload
     if ($LASTEXITCODE -ne 0) { throw 'Connection panel startup regression test failed.' }
+    & dotnet run --project (Join-Path $root 'Tools/ArdSmoke/ArdSmoke.csproj') -- $artifacts
+    if ($LASTEXITCODE -ne 0) { throw 'Apple ARD protocol simulation failed.' }
     & dotnet run --project (Join-Path $root 'Tools/ImportSmoke/ImportSmoke.csproj') -- $payload $artifacts
     if ($LASTEXITCODE -ne 0) { throw 'XML/RDP connection import regression test failed.' }
     & dotnet run --project (Join-Path $root 'Tools/GuiSmoke/GuiSmoke.csproj') "-p:MGRemotePayload=$payload" -- $payload $artifacts

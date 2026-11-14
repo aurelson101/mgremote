@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using mRemoteNG.App;
@@ -122,7 +122,7 @@ namespace mRemoteNG.Connection
                         throw new InvalidOperationException("Choisissez un bastion SSH distinct, sans tunnel imbriqué. Pour plusieurs sauts, utilisez un profil OpenSSH ProxyJump.");
                     if (connectionInfoSshTunnel.Protocol == ProtocolType.SSH2)
                     {
-                        if (connectionInfoOriginal.Protocol is not (ProtocolType.RDP or ProtocolType.SSH2 or ProtocolType.VNC))
+                        if (connectionInfoOriginal.Protocol is not (ProtocolType.RDP or ProtocolType.SSH2 or ProtocolType.VNC or ProtocolType.ARD))
                             throw new InvalidOperationException("Le tunnel OpenSSH intégré prend en charge SSH2, RDP et VNC.");
                         string destination = connectionInfoOriginal.Hostname;
                         using var startupCancellation = new CancellationTokenSource();

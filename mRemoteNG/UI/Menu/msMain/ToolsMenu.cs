@@ -47,9 +47,6 @@ namespace mRemoteNG.UI.Menu
             var anyDesk = new ToolStripMenuItem("AnyDesk (optionnel)…") { Name = "mgremoteAnyDesk" };
             anyDesk.Click += (_, _) => { using var dialog = new mRemoteNG.UI.Forms.AnyDeskForm(); dialog.ShowDialog(MainForm); };
             DropDownItems.Add(anyDesk);
-            var macRemote = new ToolStripMenuItem("Mac — Korben Remote Desktop (web)…") { Name = "mgremoteMacRemote" };
-            macRemote.Click += (_, _) => { using var dialog = new mRemoteNG.UI.Forms.MacRemoteForm(); dialog.ShowDialog(MainForm); };
-            DropDownItems.Add(macRemote);
             var serial = new ToolStripMenuItem("Console série (COM)…") { Name = "mgremoteSerial" };
             serial.Click += (_, _) => new mRemoteNG.UI.Forms.SerialConsoleForm().Show(MainForm);
             DropDownItems.Add(serial);

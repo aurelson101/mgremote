@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.ComponentModel;
 using System.Net.Sockets;
@@ -44,7 +44,13 @@ namespace mRemoteNG.Connection.Protocol.VNC
             {
                 _vnc = Control as VncSharpCore.RemoteDesktop;
                 _info = InterfaceControl.Info;
+                if ((_info.Protocol == ProtocolType.ARD || _info.VNCAuthMode == AuthMode.AppleARD) && InterfaceControl.SSHTunnelInfo == null)
+                    throw new InvalidOperationException("Apple Remote Desktop : sélectionnez un tunnel SSH pour protéger l’identité du Mac et le bureau distant.");
+                if ((_info.Protocol == ProtocolType.ARD || _info.VNCAuthMode == AuthMode.AppleARD) &&
+                    !string.Equals(InterfaceControl.SSHTunnelInfo.Hostname, InterfaceControl.OriginalInfo?.Hostname, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Apple Remote Desktop : la connexion SSH doit viser la même adresse de Mac, pas un bastion intermédiaire.");
                 _vnc.VncPort = _info.Port;
+                _vnc.AppleUsername = (_info.Protocol == ProtocolType.ARD || _info.VNCAuthMode == AuthMode.AppleARD) ? (_info.Username ?? "") : null;
 
                 return true;
             }

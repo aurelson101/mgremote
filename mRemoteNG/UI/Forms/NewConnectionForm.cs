@@ -77,7 +77,7 @@ internal sealed class NewConnectionForm : Form
             fields.SetColumnSpan(control, 2);
         }
         AddNote(new Label { Text = "Choisissez un protocole, puis indiquez le serveur à joindre.", AutoSize = true });
-        _protocol.Items.AddRange(new object[] { "RDP — Bureau à distance Windows", "SSH — OpenSSH Windows", "VNC — via tunnel SSH" });
+        _protocol.Items.AddRange(new object[] { "RDP — Bureau à distance Windows", "SSH — OpenSSH Windows", "VNC — via tunnel SSH", "Apple Remote Desktop — compte macOS" });
         AddRow("Nom (facultatif)", _name);
         AddRow("Protocole", _protocol);
         AddRow("Serveur / adresse IP", _host);
@@ -121,7 +121,7 @@ internal sealed class NewConnectionForm : Form
         };
         _protocol.SelectedIndexChanged += (_, _) => {
             bool ssh = _protocol.SelectedIndex == 1;
-            int nextPort = ssh ? 22 : _protocol.SelectedIndex == 2 ? 5900 : 3389;
+            int nextPort = ssh ? 22 : _protocol.SelectedIndex >= 2 ? 5900 : 3389;
             if (_port.Value == _defaultPort) _port.Value = nextPort;
             _defaultPort = nextPort;
             _domain.Enabled = _protocol.SelectedIndex == 0;
@@ -130,8 +130,8 @@ internal sealed class NewConnectionForm : Form
             sharing.Visible = _protocol.SelectedIndex == 0;
             _guidance.Text = ssh
                 ? "Clé privée OpenSSH/PEM. Pour une clé chiffrée : chargez-la dans ssh-agent via Clés et profils, ou utilisez le clic droit SSH — console Windows. Pour un profil : alias, utilisateur vide et port du profil. Vérifiez l’empreinte du serveur."
-                : _protocol.SelectedIndex == 2
-                ? "VNC : choisissez un bastion SSH pour chiffrer le transport. Configurez la clé facultative du bastion dans sa connexion SSH."
+                : _protocol.SelectedIndex >= 2
+                ? "Apple/VNC : choisissez un bastion SSH pour chiffrer le transport. Configurez la clé facultative du bastion dans sa connexion SSH."
                 : "Authentification du serveur et NLA/CredSSP activés, même via un tunnel. Le certificat RDP doit rester valide. Le mot de passe sera demandé à la connexion.";
         };
         _protocol.SelectedIndex = 0;
@@ -154,8 +154,9 @@ internal sealed class NewConnectionForm : Form
         _error.Text = string.Empty;
         try
         {
+            if (_protocol.SelectedIndex == 3 && string.IsNullOrWhiteSpace(user)) throw new ArgumentException("Indiquez le nom court du compte macOS.");
             if (host.Length == 0) throw new ArgumentException("Indiquez le serveur, son adresse IP ou un alias SSH.");
-            if (_protocol.SelectedIndex == 2 && _tunnel.SelectedIndex == 0)
+            if (_protocol.SelectedIndex >= 2 && _tunnel.SelectedIndex == 0)
                 throw new ArgumentException("Choisissez un tunnel SSH pour protéger cette nouvelle connexion VNC.");
             if (ssh) _ = WindowsSecurityPolicy.BuildOpenSshArguments(host, user, (int)_port.Value, identityOptions);
             else if (Uri.CheckHostName(host.Trim('[', ']')) == UriHostNameType.Unknown)
@@ -173,7 +174,7 @@ internal sealed class NewConnectionForm : Form
         inheritance.SSHTunnelConnectionName = false;
         _connection.Name = string.IsNullOrWhiteSpace(_name.Text) ? host : _name.Text.Trim();
         _connection.Hostname = host;
-        _connection.Protocol = ssh ? ProtocolType.SSH2 : _protocol.SelectedIndex == 2 ? ProtocolType.VNC : ProtocolType.RDP;
+        _connection.Protocol = _protocol.SelectedIndex == 3 ? ProtocolType.ARD : ssh ? ProtocolType.SSH2 : _protocol.SelectedIndex == 2 ? ProtocolType.VNC : ProtocolType.RDP;
         _connection.Port = (int)_port.Value;
         _connection.Username = user;
         _connection.Domain = _protocol.SelectedIndex == 0 ? _domain.Text.Trim() : string.Empty;

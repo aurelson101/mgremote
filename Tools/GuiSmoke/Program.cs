@@ -450,8 +450,10 @@ internal static class Program
         using (var dialog = (Form)Activator.CreateInstance(dialogType, new[] { model })) {
             dialog.Opacity = 0; dialog.ShowInTaskbar = false; dialog.Show(); Application.DoEvents();
             ((CheckBox)dialog.Controls.Find("RdpFiles", true)[0]).Checked = true;
+            ((CheckBox)dialog.Controls.Find("RdpCertificatePrompt", true)[0]).Checked = true;
             Check(((CheckBox)dialog.Controls.Find("RdpClipboard", true)[0]).Checked, "Enabling RDP file copying did not enable the clipboard.");
             ((Button)dialog.Controls.Find("ApplyRdpSharing", true)[0]).PerformClick();
+            Check(Convert.ToInt32(modelType.GetProperty("RDPAuthenticationLevel").GetValue(model)) == 2, "RDP certificate confirmation was not saved from its checkbox.");
             Check((bool)modelType.GetProperty("RedirectClipboard").GetValue(model) && modelType.GetProperty("RedirectDiskDrives").GetValue(model).ToString() == "Custom" &&
                 modelType.GetProperty("RedirectDiskDrivesCustom").GetValue(model).ToString() == "", "Clipboard file sharing exposed whole drives without selection.");
         }

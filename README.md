@@ -93,6 +93,6 @@ The Windows fork started from mRemoteNG commit `25ef453aaf18f292478dd41e5bb26798
 
 ## Mac access
 
-Tools → Mac — Korben Remote Desktop (web) opens the temporary HTTPS link explicitly enabled in the Mac agent. Verify its certificate fingerprint in the browser against the agent. This is an external browser integration, not a native Apple Remote Desktop protocol implementation; the agent must already be installed. See [Korben Remote Desktop](https://korben.info/en/korben-remote-desktop-control-your-mac-remotely-for-free.html). No MacBook or macOS virtual machine has been qualified.
+Select **Apple Remote Desktop — compte macOS** in New Connection, port 5900, the Mac account username/password and an SSH tunnel profile targeting that Mac. The integrated viewer negotiates Apple ARD RFB security type 30; it refuses to downgrade to password-only VNC or no authentication. The Mac must enable Screen Sharing/Remote Management for the account and Remote Login for SSH. This is native ARD standard-mode authentication, not Korben's distinct agent protocol or Apple's high-performance/SRP mode. Type 30 does not authenticate the server or encrypt the entire desktop; the SSH tunnel is mandatory. A simulated Apple server tests the handshake; macOS hardware qualification remains pending.
 
 The RDP sharing dialog offers explicit certificate confirmation. Uncheck it for strict certificate validation; NLA remains enforced. Reconnect after changing it.
