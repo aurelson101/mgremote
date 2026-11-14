@@ -277,6 +277,12 @@ internal static class Program
         Check(new FileInfo(Path.Combine(target,"Lot été","vide.txt")).Length==0&&File.ReadAllText(Path.Combine(target,"notes é.txt"))==File.ReadAllText(paths[1]),"Empty/Unicode/multiple SFTP files differ.");
         var existing=new DataObject();existing.SetData(DataFormats.FileDrop,new[]{paths[1]});
         onDrop.Invoke(remote,new object[]{new DragEventArgs(existing,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});await Drain(5,false);
+        File.WriteAllText(paths[1],"Replacement explicitly enabled");
+        ((CheckBox)browser.Controls.Find("SftpOverwrite",true)[0]).Checked=true;
+        onDrop.Invoke(remote,new object[]{new DragEventArgs(existing,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});await Drain(6,true);
+        Check(File.ReadAllText(Path.Combine(target,"notes é.txt"))!="Replacement explicitly enabled","Upload unexpectedly changed a local destination.");
+        onDrop.Invoke(local,new object[]{new DragEventArgs(download,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});await Drain(8,true);
+        Check(File.ReadAllText(Path.Combine(target,"notes é.txt"))=="Replacement explicitly enabled","Explicit SFTP replacement failed.");
         var child=type.GetMethod("LocalChild",BindingFlags.Static|BindingFlags.NonPublic);
         foreach(string invalid in new[]{"../escape","..\\escape","stream:ads","CON.txt","trailing.","bad\nname"}) {
             bool rejected=false;try{child.Invoke(null,new object[]{target,invalid});}catch(TargetInvocationException){rejected=true;}
@@ -287,11 +293,24 @@ internal static class Program
             try{await Call(session,"TransferAsync",paths[1],remoteRoot,true,false,null,cancelled.Token);}catch(Exception){rejected=true;}
             Check(rejected,"Cancelled SFTP transfer was executed.");
         }
+        using(var cancellation=new CancellationTokenSource()) {
+            string large=Path.Combine(source,"cancel-in-flight.bin");using(var file=File.Create(large))file.SetLength(128L*1024*1024);
+            var progressType=app.GetType("mRemoteNG.Security.SftpProgress",true);
+            object progress=Activator.CreateInstance(typeof(Progress<>).MakeGenericType(progressType));
+            Action<object,object> cancelOnBytes=(_,value)=>{if((long)progressType.GetProperty("Bytes").GetValue(value)>0)cancellation.Cancel();};
+            var changed=progress.GetType().GetEvent("ProgressChanged");changed.AddEventHandler(progress,Delegate.CreateDelegate(changed.EventHandlerType,cancelOnBytes.Target,cancelOnBytes.Method));
+            bool cancelled=false;
+            try{await Call(session,"TransferAsync",large,remoteRoot,true,false,progress,cancellation.Token);}catch(OperationCanceledException){cancelled=true;}
+            Check(cancelled,"In-flight SFTP transfer was not cancelled.");
+            var listingTask=(Task)type.GetMethod("ListAsync").Invoke(session,new object[]{remoteRoot,CancellationToken.None});await listingTask;
+            var listing=(IEnumerable)listingTask.GetType().GetProperty("Result").GetValue(listingTask);
+            Check(!listing.Cast<object>().Any(x=>((string)x.GetType().GetProperty("Name").GetValue(x)).Contains("cancel-in-flight")),"Cancelled SFTP upload retained a final or staging file.");
+        }
         Check(ticks>0,"SFTP transfers blocked the GUI heartbeat.");
         using(var image=new Bitmap(browser.Width,browser.Height)){browser.DrawToBitmap(image,new Rectangle(Point.Empty,browser.Size));image.Save(Path.Combine(artifacts,"gui-sftp-browser.png"));}
         browser.Close();var deadline=DateTime.UtcNow.AddSeconds(10);while(!browser.IsDisposed&&DateTime.UtcNow<deadline)await Task.Delay(20);
         Check(browser.IsDisposed,"SFTP browser did not close and release its worker.");
-        File.WriteAllText(Path.Combine(artifacts,"sftp-browser-verification.json"),System.Text.Json.JsonSerializer.Serialize(new{Result="PASS",TwoPanes=true,MultipleFilesAndRecursiveFolders=true,MouseDropHandlersBothDirections=true,ExternalExplorerUploadDrop=true,UnicodeAndBinaryAndEmptyFiles=true,HostKeyRejection=true,PasswordWithoutKey=lab.TryGetProperty("SftpPassword",out _),OverwriteRefusedByDefault=true,UnsafeNamesRejected=true,CancellationTested=true,UiHeartbeatTicks=ticks,PhysicalMouseTested=false},new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
+        File.WriteAllText(Path.Combine(artifacts,"sftp-browser-verification.json"),System.Text.Json.JsonSerializer.Serialize(new{Result="PASS",TwoPanes=true,MultipleFilesAndRecursiveFolders=true,MouseDropHandlersBothDirections=true,ExternalExplorerUploadDrop=true,UnicodeAndBinaryAndEmptyFiles=true,HostKeyRejection=true,PasswordWithoutKey=lab.TryGetProperty("SftpPassword",out _),OverwriteRefusedByDefault=true,ExplicitReplacementTested=true,UnsafeNamesRejected=true,InFlightCancellationAndStagingCleanup=true,UiHeartbeatTicks=ticks,PhysicalMouseTested=false},new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine("PASS: two-pane SFTP browser, multiple mouse-drop files/folders both ways, pinned host key, optional key, binary/Unicode/empty files, overwrite protection, cancellation and live GUI heartbeat.");
     }
     private static async Task TestVirtualRdp(Form host, System.Text.Json.JsonElement lab)
