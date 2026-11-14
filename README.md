@@ -17,6 +17,10 @@ Download the Windows MSI from the release. SHA-256 manifests, validation reports
 
 Actual Windows interface captured during GUI validation with synthetic data. No live remote session is shown.
 
+![MGRemote SFTP: local and remote panes, multiple files and transfer queue](docs/images/windows-sftp.png)
+
+Actual SFTP browser captured against a temporary local test server, with synthetic files. The queue also shows the expected refusal to overwrite an existing file when replacement is disabled.
+
 ## Windows edition
 
 - Tabbed RDP, SSH and VNC connections, with a separate connection-properties panel.
