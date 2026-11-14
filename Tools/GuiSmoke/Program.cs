@@ -140,6 +140,7 @@ internal static class Program
                 await TestSerialConsole(artifacts);
                 await TestTunnelLifecycle(artifacts);
                 TestRdpSharing(main, host, artifacts);
+                TestAppleProtocolRouting(host);
                 int sshCycles = 0;
                 for (int i = 0; i < 3; i++) {
                     using var ssh = (Form)Activator.CreateInstance(app.GetType("mRemoteNG.UI.Forms.SshProfileForm", true));
@@ -181,6 +182,30 @@ internal static class Program
         Application.Run(host);
     }
 
+    private static void TestAppleProtocolRouting(Form host)
+    {
+        var modelType = app.GetType("mRemoteNG.Connection.ConnectionInfo", true);
+        var model = Activator.CreateInstance(modelType);
+        modelType.GetProperty("Protocol").SetValue(model, Enum.Parse(modelType.GetProperty("Protocol").PropertyType, "ARD"));
+        modelType.GetProperty("Hostname").SetValue(model, "simulated-mac.invalid");
+        modelType.GetProperty("Username").SetValue(model, "mac-user"); modelType.GetProperty("Port").SetValue(model, 5900);
+        var inheritance = modelType.GetProperty("Inheritance").GetValue(model);
+        inheritance.GetType().GetProperty("EverythingInherited").SetValue(inheritance, false);
+        var factory = Activator.CreateInstance(app.GetType("mRemoteNG.Connection.Protocol.ProtocolFactory", true));
+        var protocol = factory.GetType().GetMethod("CreateProtocol").Invoke(factory, new[] { model });
+        Check(protocol.GetType().Name == "ProtocolARD", "Apple connection did not select the integrated ARD protocol.");
+        using var container = new Panel { Parent = host, Size = new Size(400, 300) };
+        try {
+            var bridge = (Control)Activator.CreateInstance(app.GetType("mRemoteNG.Connection.InterfaceControl", true), new object[] { container, protocol, model });
+            bridge.GetType().GetProperty("OriginalInfo").SetValue(bridge, model);
+            var ssh = Activator.CreateInstance(modelType); modelType.GetProperty("Hostname").SetValue(ssh, "simulated-mac.invalid");
+            bridge.GetType().GetProperty("SSHTunnelInfo").SetValue(bridge, ssh);
+            protocol.GetType().GetProperty("InterfaceControl").SetValue(protocol, bridge);
+            Check((bool)protocol.GetType().GetMethod("Initialize").Invoke(protocol, null), "The native Apple desktop control did not initialize.");
+            object control = protocol.GetType().GetProperty("Control").GetValue(protocol);
+            Check((string)control.GetType().GetProperty("AppleUsername").GetValue(control) == "mac-user", "The Apple account was not passed to the native desktop control.");
+        } finally { ((IDisposable)protocol).Dispose(); }
+    }
     private static async Task TestVirtualServers(Form host, string artifacts)
     {
         string file = Environment.GetEnvironmentVariable("MGREMOTE_REMOTE_FIXTURE");

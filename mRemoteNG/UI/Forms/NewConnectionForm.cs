@@ -130,8 +130,10 @@ internal sealed class NewConnectionForm : Form
             sharing.Visible = _protocol.SelectedIndex == 0;
             _guidance.Text = ssh
                 ? "Clé privée OpenSSH/PEM. Pour une clé chiffrée : chargez-la dans ssh-agent via Clés et profils, ou utilisez le clic droit SSH — console Windows. Pour un profil : alias, utilisateur vide et port du profil. Vérifiez l’empreinte du serveur."
-                : _protocol.SelectedIndex >= 2
-                ? "Apple/VNC : choisissez un bastion SSH pour chiffrer le transport. Configurez la clé facultative du bastion dans sa connexion SSH."
+                : _protocol.SelectedIndex == 3
+                ? "Apple Remote Desktop : compte macOS et connexion SSH visant la même adresse de Mac. Activez Partage d’écran/Gestion à distance et Accès à distance SSH sur le Mac. Port du bureau : 5900. Aucun agent Korben nécessaire."
+                : _protocol.SelectedIndex == 2
+                ? "VNC : choisissez un bastion SSH pour chiffrer le transport. Configurez la clé facultative du bastion dans sa connexion SSH."
                 : "Authentification du serveur et NLA/CredSSP activés, même via un tunnel. Le certificat RDP doit rester valide. Le mot de passe sera demandé à la connexion.";
         };
         _protocol.SelectedIndex = 0;
@@ -175,6 +177,10 @@ internal sealed class NewConnectionForm : Form
         _connection.Name = string.IsNullOrWhiteSpace(_name.Text) ? host : _name.Text.Trim();
         _connection.Hostname = host;
         _connection.Protocol = _protocol.SelectedIndex == 3 ? ProtocolType.ARD : ssh ? ProtocolType.SSH2 : _protocol.SelectedIndex == 2 ? ProtocolType.VNC : ProtocolType.RDP;
+        if (_protocol.SelectedIndex == 3) {
+            _connection.Inheritance.VNCAuthMode = false;
+            _connection.VNCAuthMode = mRemoteNG.Connection.Protocol.VNC.ProtocolVNC.AuthMode.AppleARD;
+        }
         _connection.Port = (int)_port.Value;
         _connection.Username = user;
         _connection.Domain = _protocol.SelectedIndex == 0 ? _domain.Text.Trim() : string.Empty;
