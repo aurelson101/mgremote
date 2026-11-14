@@ -132,18 +132,11 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     $certificateScript=Join-Path $root 'certificate.ps1'
     @'
 $ErrorActionPreference='Stop'
-$cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
-try {
-    $rsa=$cert.PrivateKey
-    try { $keyName=$rsa.CspKeyContainerInfo.UniqueKeyContainerName } finally { if ($rsa) { $rsa.Dispose() } }
-    if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'Invalid isolated CSP key container.' }
-    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\RSA\MachineKeys\'+$keyName)
-    if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'Isolated key file missing.' }
-    $keyAcl=Get-Acl $keyFile
-    $keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'))
-    Set-Acl $keyFile $keyAcl
-    $cert.Thumbprint
-} catch { Remove-Item ('Cert:\LocalMachine\My\'+$cert.Thumbprint) -DeleteKey; throw }
+$security=[Security.AccessControl.FileSecurity]::new()
+$security.SetAccessRuleProtection($true,$false)
+foreach ($sid in @('S-1-5-18','S-1-5-32-544')) { $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','Allow')) }
+$security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'))
+(New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -SecurityDescriptor $security -NotAfter (Get-Date).AddHours(2)).Thumbprint
 '@ | Set-Content -LiteralPath $certificateScript -Encoding UTF8
     $thumbprint=& "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -File $certificateScript
     if ($LASTEXITCODE -ne 0 -or "$thumbprint" -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Isolated certificate creation failed.' }
