@@ -254,7 +254,7 @@ internal static class Program
             browser.ClientSize=size;Application.DoEvents();
             var controls=new Stack<Control>();controls.Push(browser);
             while(controls.TryPop(out var control)) {
-                foreach(Control child in control.Controls)controls.Push(child);
+                foreach(Control nestedControl in control.Controls)controls.Push(nestedControl);
                 if(control is TextBox or Button && control.Parent is TableLayoutPanel)
                     Check(control.Left>=0&&control.Right<=control.Parent.ClientSize.Width+1,"SFTP navigation is clipped at "+size+": "+control.Name+" "+control.Text);
             }
