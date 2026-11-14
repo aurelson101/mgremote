@@ -47,13 +47,13 @@ Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly request
 
 ## RDP certificate warnings and recovery
 
-Strict certificate validation remains the default. To review and explicitly accept a server certificate, select **Warn if authentication fails** in the connection's authentication settings. Verify the certificate before confirming; CredSSP/NLA stays enabled.
+Strict certificate validation remains the default. To review and explicitly accept a server certificate, select **Warn if authentication fails** in the connection's authentication settings. The RDP settings also expose **Certificat non reconnu : demander avant de continuer**. Verify the certificate before confirming; CredSSP/NLA stays enabled.
 
 Automatic reconnect checks the configured endpoint in the background and updates ActiveX on the Windows UI thread. Closing the session stops its timer and invalidates pending results. Normal disconnections do not start an automatic reconnect loop. Pre-login errors include disconnect codes instead of silently closing the session.
 
 ## Concurrency and ARM64
 
-SSH/ConPTY and serial sessions run input/output on background workers. Transfers await child processes asynchronously, and upload-tree validation runs off the UI thread. Input queues are bounded. The plain-text fallback console batches rendering every 33 ms and caps visible history at 200,000 characters. RDP ActiveX and Windows controls stay on the STA UI thread; reconnect probes run in the background with overlap prevention and close-time cancellation.
+SSH/ConPTY and serial sessions run input/output on background workers. SFTP transfers run on cancellable background workers with pooled 64 KiB buffers and progress updates limited to every 100 ms; upload-tree validation runs off the UI thread. Input queues are bounded. The plain-text fallback console batches rendering every 33 ms and caps visible history at 200,000 characters. RDP ActiveX and Windows controls stay on the STA UI thread; reconnect probes run in the background with overlap prevention and close-time cancellation.
 
 ConPTY pipe reads remain synchronous on a background worker per active terminal. The GUI test includes 16 simultaneous local ConPTY child processes, final-output checks, a GUI heartbeat and complete child cleanup. This is a bounded concurrency test, not a remote-server throughput guarantee.
 
@@ -94,7 +94,7 @@ The Windows fork started from mRemoteNG commit `25ef453aaf18f292478dd41e5bb26798
 
 ## Mac access
 
-Select **Apple Remote Desktop — compte macOS** in New Connection, port 5900, the Mac account username/password and, optionally, an SSH tunnel profile targeting that Mac. The integrated viewer negotiates Apple ARD RFB security type 30; it refuses to downgrade to password-only VNC or no authentication. The Mac must enable Screen Sharing/Remote Management for the account and Remote Login for SSH. This is native ARD standard-mode authentication, not Korben's distinct agent protocol or Apple's high-performance/SRP mode. Type 30 does not authenticate the server or encrypt the entire desktop. Direct connections are available; use a private network or VPN. The optional SSH profile must use the same Mac address and forwards to its loopback interface. A simulated Apple server tests the handshake; macOS hardware qualification remains pending.
+Select **Apple Remote Desktop — compte macOS** in New Connection, port 5900, the Mac account username/password and, optionally, an SSH tunnel profile targeting that Mac. The integrated viewer negotiates Apple ARD RFB security type 30; it refuses to downgrade to password-only VNC or no authentication. The Mac must enable Screen Sharing/Remote Management for the account and, only when using an SSH tunnel, Remote Login for SSH. This is native ARD standard-mode authentication, not Korben's distinct agent protocol or Apple's high-performance/SRP mode. Type 30 does not authenticate the server or encrypt the entire desktop. Direct connections are available; use a private network or VPN. The optional SSH profile must use the same Mac address and forwards to its loopback interface. A simulated Apple server tests the handshake; macOS hardware qualification remains pending.
 
 The RDP sharing dialog offers explicit certificate confirmation. Uncheck it for strict certificate validation; NLA remains enforced. Reconnect after changing it.
 
@@ -105,3 +105,7 @@ Tools → Discover local network (IP/MAC) lists known ARP neighbors or searches 
 ## Linux AppImage
 
 The Linux edition is restored from its last 0.2.21 source and released as 0.2.22. Its window icon, AppImage .DirIcon and hicolor desktop icon use the MGRemote icon. See [Linux instructions and limitations](Linux/README.md). Linux currently provides SSH, RDP, serial and SFTP workflows; Windows native Apple ARD account authentication is not part of this Linux build.
+
+![Apple connection settings with optional SSH tunnel; simulated configuration, not a real Mac desktop](docs/images/windows-apple-connection.png)
+
+![Linux AppImage interface with synthetic connections](docs/images/linux-overview.png)
