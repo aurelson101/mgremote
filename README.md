@@ -6,8 +6,8 @@ MGRemote is an independent remote-connection manager derived from [mRemoteNG](ht
 
 | Platform | Current package | Status |
 | --- | --- | --- |
-| Windows x64 | [MSI 0.1.18](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.18) | Unsigned preview |
-| Windows ARM64 | [Native MSI 0.1.18](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.18) | Unsigned preview |
+| Windows x64 | [MSI 0.1.19](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.19) | Unsigned preview |
+| Windows ARM64 | [Native MSI 0.1.19](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.19) | Unsigned preview |
 
 Download the Windows MSI from the release. SHA-256 manifests, validation reports and the corresponding source archive accompany the installer.
 
@@ -38,8 +38,8 @@ Install the MSI normally. Windows OpenSSH Client and the Microsoft Edge WebView2
 Silent installation and removal use standard Windows Installer commands:
 
 ```powershell
-msiexec /i "MGRemote-0.1.18-win-x64-preview.msi" /qn /norestart
-msiexec /x "MGRemote-0.1.18-win-x64-preview.msi" /qn /norestart
+msiexec /i "MGRemote-0.1.19-win-x64-preview.msi" /qn /norestart
+msiexec /x "MGRemote-0.1.19-win-x64-preview.msi" /qn /norestart
 ```
 
 Removal preserves user settings by default. `PURGEUSERDATA=1` explicitly requests cleanup of app-owned data for the current interactive user. It does not erase operating-system or antivirus records, other users' profiles, documents or personal SSH keys. See [Windows implementation notes](MGREMOTE-WINDOWS.md).
@@ -90,3 +90,9 @@ Windows: install .NET 10 and Visual Studio Build Tools with the .NET desktop wor
 ## Attribution and license
 
 The Windows fork started from mRemoteNG commit `25ef453aaf18f292478dd41e5bb26798ff504312`. Copyright and contributor notices from mRemoteNG and bundled components are retained. MGRemote modifications are distributed under [GPL-2.0](COPYING.txt); third-party components retain their respective licenses. Release source archives provide the corresponding source for each published package.
+
+## Mac access
+
+Tools → Mac — Korben Remote Desktop (web) opens the temporary HTTPS link explicitly enabled in the Mac agent. Verify its certificate fingerprint in the browser against the agent. This is an external browser integration, not a native Apple Remote Desktop protocol implementation; the agent must already be installed. See [Korben Remote Desktop](https://korben.info/en/korben-remote-desktop-control-your-mac-remotely-for-free.html). No MacBook or macOS virtual machine has been qualified.
+
+The RDP sharing dialog offers explicit certificate confirmation. Uncheck it for strict certificate validation; NLA remains enforced. Reconnect after changing it.

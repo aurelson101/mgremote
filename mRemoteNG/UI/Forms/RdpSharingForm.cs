@@ -36,7 +36,12 @@ internal sealed class RdpSharingForm : Form
         files.CheckedChanged += (_, _) => { drives.Enabled = files.Checked; if (files.Checked) clipboard.Checked = true; };
         var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         var apply = new Button { Name = "ApplyRdpSharing", Text = "Appliquer (reconnexion)", AutoSize = true };
+        var certificates = new CheckBox { Name = "RdpCertificatePrompt", Text = "Certificat non reconnu : demander avant de continuer", AutoSize = true,
+            Checked = connection.RDPAuthenticationLevel == AuthenticationLevel.WarnOnFailedAuth };
+        actions.Controls.Add(certificates);
         apply.Click += (_, _) => {
+            connection.Inheritance.RDPAuthenticationLevel = false;
+            connection.RDPAuthenticationLevel = certificates.Checked ? AuthenticationLevel.WarnOnFailedAuth : AuthenticationLevel.AuthRequired;
             connection.Inheritance.RedirectClipboard = connection.Inheritance.RedirectDiskDrives = connection.Inheritance.RedirectDiskDrivesCustom = false;
             connection.RedirectClipboard = clipboard.Checked;
             connection.RedirectDiskDrives = files.Checked ? RDPDiskDrives.Custom : RDPDiskDrives.None;
