@@ -120,6 +120,7 @@ internal sealed class NewConnectionForm : Form
             _error.MaximumSize = new Size(width, 0);
         };
         _protocol.SelectedIndexChanged += (_, _) => {
+            _error.Text = string.Empty;
             bool ssh = _protocol.SelectedIndex == 1;
             userLabel.Text = _protocol.SelectedIndex == 3 ? "Utilisateur macOS (obligatoire)" : "Utilisateur (facultatif)";
             int nextPort = ssh ? 22 : _protocol.SelectedIndex >= 2 ? 5900 : 3389;
