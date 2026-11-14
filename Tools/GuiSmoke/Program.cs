@@ -261,7 +261,7 @@ internal static class Program
         async Task Drain(int count,bool success) {
             await ((Task)formType.GetField("_transfers",Fields).GetValue(browser)).WaitAsync(TimeSpan.FromSeconds(90));
             Check(queue.Items.Count==count,"SFTP mouse drop lost selected items.");
-            Check(queue.Items[count-1].SubItems[3].Text.StartsWith(success?"Terminé":"Échec"),"Unexpected SFTP queue outcome: "+queue.Items[count-1].SubItems[3].Text);
+            Check(queue.Items[count-1].SubItems[3].Text.StartsWith(success?"Terminé":"Échec"),"Unexpected SFTP queue outcome: "+queue.Items[count-1].SubItems[3].Text+" "+queue.Items[count-1].Tag);
         }
         string[] paths={Path.Combine(source,"Lot été"),Path.Combine(source,"notes é.txt")};
         var upload=new DataObject();upload.SetData(DataFormats.FileDrop,paths);

@@ -23,7 +23,7 @@ internal sealed class SftpBrowserSession : IDisposable
     private readonly Renci.SshNet.ConnectionInfo _connection;
     private readonly List<PrivateKeyFile> _keys = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
-    public string Home => _client.WorkingDirectory;
+    public string Home => NormalizeRemote(_client.WorkingDirectory);
 
     public SftpBrowserSession(string host, int port, string user, string password, string[] identities,
         Func<string, string> passphrase, Func<string, byte[], bool> trust)
@@ -55,6 +55,7 @@ internal sealed class SftpBrowserSession : IDisposable
     }
 
     public Task<SftpEntry[]> ListAsync(string path, CancellationToken token) => Work(() => {
+        path = NormalizeRemote(path);
         ValidateRemoteDirectory(path);
         var entries = new List<SftpEntry>();
         foreach (var file in _client.ListDirectory(path)) {
@@ -70,10 +71,12 @@ internal sealed class SftpBrowserSession : IDisposable
         IProgress<SftpProgress> progress, CancellationToken token) => Work(() => {
         int entries = 0;
         if (upload) {
+            destinationDirectory = NormalizeRemote(destinationDirectory);
             SshFileTransfer.ValidateUploadTree(source, token);
             ValidateRemoteDirectory(destinationDirectory);
             Upload(source, Join(destinationDirectory, Path.GetFileName(Path.TrimEndingDirectorySeparator(source))), 0);
         } else {
+            source = NormalizeRemote(source);
             ValidateLocalDirectory(destinationDirectory);
             ValidateRemoteDirectory(Parent(source));
             Download(source, destinationDirectory, 0);
@@ -175,9 +178,10 @@ internal sealed class SftpBrowserSession : IDisposable
     {
         if (string.IsNullOrEmpty(name) || name is "." or ".." || name.IndexOfAny(new[] { '/', '\\', '\0' }) >= 0)
             throw new IOException("Nom distant non valide.");
-        return directory.TrimEnd('/') + "/" + name;
+        return NormalizeRemote(directory).TrimEnd('/') + "/" + name;
     }
-    internal static string Parent(string path) { path = path.TrimEnd('/'); if (path.Length == 2 && path[1] == ':') return path + "/"; int i = path.LastIndexOf('/'); return i <= 0 ? "/" : i == 2 && path[1] == ':' ? path[..3] : path[..i]; }
+    internal static string NormalizeRemote(string path) => path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1..3] == ":/" ? "/" + path : path;
+    internal static string Parent(string path) { path = NormalizeRemote(path).TrimEnd('/'); if (path.Length == 3 && path[0] == '/' && path[2] == ':') return path + "/"; int i = path.LastIndexOf('/'); return i <= 0 ? "/" : i == 3 && path[2] == ':' ? path[..4] : path[..i]; }
     internal static string LocalChild(string directory, string name)
     {
         if (string.IsNullOrEmpty(name) || name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.EndsWith('.') || name.EndsWith(' ') || name.Any(char.IsControl))

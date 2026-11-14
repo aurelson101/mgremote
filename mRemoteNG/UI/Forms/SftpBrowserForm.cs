@@ -170,7 +170,7 @@ internal sealed class SshFileTransferForm : Form
                 using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token); _activeCancellation = cancellation; job.Row.SubItems[3].Text = "En cours";
                 var progress = new Progress<SftpProgress>(p => { if (!_closing && !IsDisposed) { _status.Text = p.File + " — " + SizeText(p.Bytes) + " / " + SizeText(p.Total); _progress.Value = p.Total == 0 ? 0 : (int)Math.Clamp(p.Bytes * 1000.0 / p.Total, 0, 1000); } });
                 try { await _session.TransferAsync(job.Source, job.Destination, job.Upload, job.Overwrite, progress, cancellation.Token); job.Row.SubItems[3].Text = "Terminé"; }
-                catch (Exception ex) { job.Row.SubItems[3].Text = cancellation.IsCancellationRequested ? "Annulé" : "Échec : " + ex.Message; if (!_closing) _status.Text = job.Row.SubItems[3].Text; }
+                catch (Exception ex) { job.Row.Tag = ex; job.Row.SubItems[3].Text = cancellation.IsCancellationRequested ? "Annulé" : "Échec : " + ex.Message; if (!_closing) _status.Text = job.Row.SubItems[3].Text; }
                 finally { _activeCancellation = null; }
             }
         } finally {
