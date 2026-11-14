@@ -132,12 +132,12 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     $certificateScript=Join-Path $root 'certificate.ps1'
     @'
 $ErrorActionPreference='Stop'
-$cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
+$cert=New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft RSA SChannel Cryptographic Provider' -KeySpec KeyExchange -KeyLength 2048 -NotAfter (Get-Date).AddHours(2)
 try {
-    $rsa=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-    try { $keyName=$rsa.Key.UniqueName } finally { if ($rsa) { $rsa.Dispose() } }
-    if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'Invalid isolated CNG key container.' }
-    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\Keys\'+$keyName)
+    $rsa=$cert.PrivateKey
+    try { $keyName=$rsa.CspKeyContainerInfo.UniqueKeyContainerName } finally { if ($rsa) { $rsa.Dispose() } }
+    if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'Invalid isolated CSP key container.' }
+    $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\RSA\MachineKeys\'+$keyName)
     if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'Isolated key file missing.' }
     $keyAcl=Get-Acl $keyFile
     $keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'))
