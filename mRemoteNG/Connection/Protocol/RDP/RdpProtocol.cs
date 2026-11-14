@@ -1042,7 +1042,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private void RdpClient_GotFocus(object sender, EventArgs e)
         {
-            ((ConnectionTab)Control.Parent.Parent).Focus();
+            if (Control?.Parent?.Parent is ConnectionTab tab && !tab.IsDisposed) tab.Focus();
         }
         #endregion
 
