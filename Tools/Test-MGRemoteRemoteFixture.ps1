@@ -1,6 +1,6 @@
 # Disposable CI-only SSH/RDP lab. Never modifies a user's server.
 [CmdletBinding()]
-param([ValidateSet('Start','Stop')][string]$Action='Start')
+param([ValidateSet('Start','Stop')][string]$Action='Start', [switch]$EnableRdp)
 $ErrorActionPreference='Stop'
 if (!$IsWindows -or $env:GITHUB_ACTIONS -ne 'true') { throw 'Disposable GitHub Windows runner required.' }
 $stateFile=Join-Path $env:RUNNER_TEMP 'mgremote-remote-fixture.json'
@@ -116,7 +116,7 @@ while (!$listening -and [DateTime]::UtcNow -lt $deadline) {
 }
 if (!$listening) { if (Test-Path (Join-Path $root 'sshd.log')) { Get-Content (Join-Path $root 'sshd.log') -Tail 15 | Write-Host }; throw 'Isolated SSH fixture failed to listen.' }
 # Windows Server supports a separate administrative desktop; client Windows remains single-session.
-if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
+if ($EnableRdp -and (Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     Write-Host 'Preparing isolated RDP firewall and certificate.'
     if (@(Get-NetFirewallProfile | Where-Object { !$_.Enabled }).Count) { throw 'RDP fixture requires the Windows firewall.' }
     Add-FixtureGroup 'S-1-5-32-544'
@@ -164,4 +164,4 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     $state.RdpAvailable=$true;$state.RdpPassword=$password;$state.RdpDomain=$env:COMPUTERNAME;Save-State
 }
 "MGREMOTE_REMOTE_FIXTURE=$stateFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-Write-Host 'Isolated loopback SSH fixture ready; RDP is enabled only on the server image. No production endpoint was modified.'
+Write-Host 'Isolated loopback SSH fixture ready; the optional RDP lab runs only when explicitly requested on a server image. No production endpoint was modified.'

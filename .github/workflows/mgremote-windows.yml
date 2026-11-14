@@ -6,6 +6,10 @@ on:
         description: Validate disposable SSH/RDP fixture setup and cleanup only
         type: boolean
         default: false
+      rdp_fixture:
+        description: Experimental Windows Server RDP lab (hosted certificate setup currently stalls)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -34,7 +38,7 @@ jobs:
       - name: Prepare isolated loopback SSH and server RDP fixtures
         timeout-minutes: 5
         shell: pwsh
-        run: ./Tools/Test-MGRemoteRemoteFixture.ps1 -Action Start
+        run: ./Tools/Test-MGRemoteRemoteFixture.ps1 -Action Start -EnableRdp:('${{ inputs.rdp_fixture }}' -eq 'true')
       - name: Build and validate Windows MSI
         if: ${{ !inputs.fixture_only }}
         shell: pwsh

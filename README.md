@@ -54,6 +54,8 @@ ConPTY pipe reads remain synchronous on a background worker per active terminal.
 
 Build scripts support `x64` and `arm64`. The Windows workflow uses separate native runners and requires the matching architecture before running GUI/ActiveX and MSI checks. See the release assets and architecture-specific manifests for ARM64 availability and native test coverage. Physical ARM hardware and live remote servers require a pilot.
 
+The default CI lab runs real loopback SSH/SFTP on both architectures. The optional `rdp_fixture` experiment currently stalls during certificate/private-key setup on the hosted Windows Server runner; it is disabled by default. RDP ActiveX settings are tested locally, but an authenticated desktop session remains unqualified.
+
 ```powershell
 ./Tools/Build-MGRemotePackage.ps1 -Platform arm64
 ```
