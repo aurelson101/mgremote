@@ -221,7 +221,7 @@ internal static class Program
         if (rdp) await TestVirtualRdp(host, lab);
         File.WriteAllText(Path.Combine(artifacts,"network-verification.json"), System.Text.Json.JsonSerializer.Serialize(new {
             Result="PASS", ApplicationSshTerminalAuthenticated=true, LoopbackSftpBinaryRoundTrip=true, FailedTransferRejected=true,
-            WindowsServerRdpDesktopLogin=rdp, RdpScope=rdp ? "Isolated Windows Server loopback, NLA and trusted localhost test certificate" : "Client Windows single-session image; RDP settings tested offline",
+            WindowsServerRdpDesktopLogin=rdp, RdpScope=rdp ? "Isolated Windows Server loopback, NLA and trusted localhost test certificate" : "Authenticated RDP fixture not enabled; RDP settings tested offline",
             ProductionEndpointsModified=false
         },new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
         Console.WriteLine("PASS: application SSH terminal, pinned host key, real loopback SFTP binary round trip and transfer error; Windows Server RDP desktop=" + rdp);

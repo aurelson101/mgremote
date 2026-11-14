@@ -54,6 +54,7 @@ internal sealed class SshFileTransferForm : Form
         AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(1080, 690); DesktopAppearance.Configure(this, new Size(760, 510));
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10), ColumnCount = 1, RowCount = 4 };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
         var toolbar = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
@@ -67,6 +68,7 @@ internal sealed class SshFileTransferForm : Form
         panes.Panel2.Controls.Add(Pane("Site distant — " + _info.Hostname, _remotePath, _remote, true)); split.Panel1.Controls.Add(panes);
         _queue.Columns.Add("Sens", 90); _queue.Columns.Add("Fichier / dossier", 240); _queue.Columns.Add("Destination", 300); _queue.Columns.Add("État", 330);
         var queuePanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        queuePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         queuePanel.RowStyles.Add(new RowStyle(SizeType.AutoSize)); queuePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         queuePanel.Controls.Add(new Label { Text = "File d’attente des transferts", AutoSize = true }, 0, 0); queuePanel.Controls.Add(_queue, 0, 1);
         split.Panel2.Controls.Add(queuePanel); root.Controls.Add(split, 0, 1); root.Controls.Add(_progress, 0, 2); root.Controls.Add(_status, 0, 3); Controls.Add(root);
@@ -98,7 +100,7 @@ internal sealed class SshFileTransferForm : Form
             if (e.Control && e.KeyCode == Keys.C) { _copiedRemote = new RemoteSelection(this, Selected(_remote)); e.SuppressKeyPress = true; }
             else if (e.Control && e.KeyCode == Keys.V) { try { Enqueue(Clipboard.GetFileDropList().Cast<string>().ToArray(), _remotePath.Text, true); } catch (System.Runtime.InteropServices.ExternalException) { _status.Text = "Presse-papiers occupé."; } e.SuppressKeyPress = true; }
         };
-        Shown += async (_, _) => await BrowseLocalAsync(_localPath.Text);
+        Shown += async (_, _) => { panes.SplitterDistance = Math.Clamp((panes.ClientSize.Width - panes.SplitterWidth) / 2, panes.Panel1MinSize, Math.Max(panes.Panel1MinSize, panes.ClientSize.Width - panes.Panel2MinSize - panes.SplitterWidth)); await BrowseLocalAsync(_localPath.Text); };
         FormClosing += async (_, e) => {
             if (_allowClose) return;
             e.Cancel = true; if (_closing) return; _closing = true; _lifetime.Cancel(); CancelTransfers(); Enabled = false;
@@ -114,6 +116,7 @@ internal sealed class SshFileTransferForm : Form
     private Control Pane(string title, TextBox path, ListView list, bool remote)
     {
         var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize)); panel.RowStyles.Add(new RowStyle(SizeType.AutoSize)); panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.Controls.Add(new Label { Text = title, AutoSize = true, Padding = new Padding(0, 5, 0, 5) }, 0, 0);
         var navigation = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3 };
