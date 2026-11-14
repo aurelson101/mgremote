@@ -47,6 +47,9 @@ namespace mRemoteNG.UI.Menu
             var anyDesk = new ToolStripMenuItem("AnyDesk (optionnel)…") { Name = "mgremoteAnyDesk" };
             anyDesk.Click += (_, _) => { using var dialog = new mRemoteNG.UI.Forms.AnyDeskForm(); dialog.ShowDialog(MainForm); };
             DropDownItems.Add(anyDesk);
+            var discovery = new ToolStripMenuItem("Découvrir le réseau local (IP/MAC)…") { Name = "mgremoteLanDiscovery" };
+            discovery.Click += (_, _) => { using var dialog = new mRemoteNG.UI.Forms.LanDiscoveryForm(); dialog.ShowDialog(MainForm); };
+            DropDownItems.Add(discovery);
             var serial = new ToolStripMenuItem("Console série (COM)…") { Name = "mgremoteSerial" };
             serial.Click += (_, _) => new mRemoteNG.UI.Forms.SerialConsoleForm().Show(MainForm);
             DropDownItems.Add(serial);

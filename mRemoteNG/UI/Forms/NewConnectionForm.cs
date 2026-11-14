@@ -133,7 +133,7 @@ internal sealed class NewConnectionForm : Form
             _guidance.Text = ssh
                 ? "Clé privée OpenSSH/PEM. Pour une clé chiffrée : chargez-la dans ssh-agent via Clés et profils, ou utilisez le clic droit SSH — console Windows. Pour un profil : alias, utilisateur vide et port du profil. Vérifiez l’empreinte du serveur."
                 : _protocol.SelectedIndex == 3
-                ? "Apple Remote Desktop : compte macOS et connexion SSH visant la même adresse de Mac. Activez Partage d’écran/Gestion à distance et Accès à distance SSH sur le Mac. Port du bureau : 5900. Aucun agent Korben nécessaire."
+                ? "Apple Remote Desktop : compte macOS, Partage d’écran/Gestion à distance et port 5900. Tunnel SSH facultatif vers la même adresse de Mac. En connexion directe, le bureau n’est pas entièrement chiffré : privilégiez un réseau privé ou un VPN."
                 : _protocol.SelectedIndex == 2
                 ? "VNC : choisissez un bastion SSH pour chiffrer le transport. Configurez la clé facultative du bastion dans sa connexion SSH."
                 : "Authentification du serveur et NLA/CredSSP activés, même via un tunnel. Le certificat RDP doit rester valide. Le mot de passe sera demandé à la connexion.";
@@ -162,7 +162,7 @@ internal sealed class NewConnectionForm : Form
         {
             if (_protocol.SelectedIndex == 3 && string.IsNullOrWhiteSpace(user)) throw new ArgumentException("Indiquez le nom court du compte macOS.");
             if (host.Length == 0) throw new ArgumentException("Indiquez le serveur, son adresse IP ou un alias SSH.");
-            if (_protocol.SelectedIndex >= 2 && _tunnel.SelectedIndex == 0)
+            if (_protocol.SelectedIndex == 2 && _tunnel.SelectedIndex == 0)
                 throw new ArgumentException("Choisissez un tunnel SSH pour protéger cette nouvelle connexion VNC.");
             if (ssh) _ = WindowsSecurityPolicy.BuildOpenSshArguments(host, user, (int)_port.Value, identityOptions);
             else if (Uri.CheckHostName(host.Trim('[', ']')) == UriHostNameType.Unknown)

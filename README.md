@@ -1,12 +1,13 @@
 # MGRemote
 
-MGRemote is an independent remote-connection manager derived from [mRemoteNG](https://github.com/mRemoteNG/mRemoteNG). It provides a Windows desktop edition. This project is not affiliated with or endorsed by the upstream mRemoteNG team.
+MGRemote is an independent remote-connection manager derived from [mRemoteNG](https://github.com/mRemoteNG/mRemoteNG). It provides Windows and Linux desktop editions. This project is not affiliated with or endorsed by the upstream mRemoteNG team.
 
 ## Downloads
 
 | Platform | Current package | Status |
 | --- | --- | --- |
 | Windows x64 | [MSI 0.1.19](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.19) | Unsigned preview |
+| Linux x86_64 | [AppImage 0.2.22](https://github.com/aurelson101/mgremote/releases/tag/linux-v0.2.22) | Restored Linux preview |
 | Windows ARM64 | [Native MSI 0.1.19](https://github.com/aurelson101/mgremote/releases/tag/windows-v0.1.19) | Unsigned preview |
 
 Download the Windows MSI from the release. SHA-256 manifests, validation reports and the corresponding source archive accompany the installer.
@@ -93,6 +94,14 @@ The Windows fork started from mRemoteNG commit `25ef453aaf18f292478dd41e5bb26798
 
 ## Mac access
 
-Select **Apple Remote Desktop — compte macOS** in New Connection, port 5900, the Mac account username/password and an SSH tunnel profile targeting that Mac. The integrated viewer negotiates Apple ARD RFB security type 30; it refuses to downgrade to password-only VNC or no authentication. The Mac must enable Screen Sharing/Remote Management for the account and Remote Login for SSH. This is native ARD standard-mode authentication, not Korben's distinct agent protocol or Apple's high-performance/SRP mode. Type 30 does not authenticate the server or encrypt the entire desktop; the SSH tunnel is mandatory. A simulated Apple server tests the handshake; macOS hardware qualification remains pending.
+Select **Apple Remote Desktop — compte macOS** in New Connection, port 5900, the Mac account username/password and, optionally, an SSH tunnel profile targeting that Mac. The integrated viewer negotiates Apple ARD RFB security type 30; it refuses to downgrade to password-only VNC or no authentication. The Mac must enable Screen Sharing/Remote Management for the account and Remote Login for SSH. This is native ARD standard-mode authentication, not Korben's distinct agent protocol or Apple's high-performance/SRP mode. Type 30 does not authenticate the server or encrypt the entire desktop. Direct connections are available; use a private network or VPN. The optional SSH profile must use the same Mac address and forwards to its loopback interface. A simulated Apple server tests the handshake; macOS hardware qualification remains pending.
 
 The RDP sharing dialog offers explicit certificate confirmation. Uncheck it for strict certificate validation; NLA remains enforced. Reconnect after changing it.
+
+## Local network discovery
+
+Tools → Discover local network (IP/MAC) lists known ARP neighbors or searches the selected private IPv4 interface, capped at its containing /24 (at most 256 addresses). It shows IP, MAC when available, DNS name and OS hints. Remote OS names are estimates from names/TTL, not confirmed fingerprints. There is no external lookup service and no automatic scan at startup. Windows and Linux share this discovery engine.
+
+## Linux AppImage
+
+The Linux edition is restored from its last 0.2.21 source and released as 0.2.22. Its window icon, AppImage .DirIcon and hicolor desktop icon use the MGRemote icon. See [Linux instructions and limitations](Linux/README.md). Linux currently provides SSH, RDP, serial and SFTP workflows; Windows native Apple ARD account authentication is not part of this Linux build.

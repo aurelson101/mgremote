@@ -141,6 +141,10 @@ internal static class Program
                 await TestTunnelLifecycle(artifacts);
                 TestRdpSharing(main, host, artifacts);
                 TestAppleProtocolRouting(host);
+                using (var discovery = (Form)Activator.CreateInstance(app.GetType("mRemoteNG.UI.Forms.LanDiscoveryForm", true))) {
+                    Check(discovery.Controls.Find("DiscoveryAdapter", true).Length == 1 && discovery.Controls.Find("DiscoveryDevices", true).Length == 1,
+                        "LAN discovery dialog lacks its interface selector or device table.");
+                }
                 int sshCycles = 0;
                 for (int i = 0; i < 3; i++) {
                     using var ssh = (Form)Activator.CreateInstance(app.GetType("mRemoteNG.UI.Forms.SshProfileForm", true));
@@ -213,6 +217,13 @@ internal static class Program
             object control = protocol.GetType().GetProperty("Control", Fields).GetValue(protocol);
             Check((string)control.GetType().GetProperty("AppleUsername").GetValue(control) == "mac-user", "The Apple account was not passed to the native desktop control.");
         } finally { ((IDisposable)protocol).Dispose(); }
+        var direct = factory.GetType().GetMethod("CreateProtocol").Invoke(factory, new[] { model });
+        try {
+            var bridge = (Control)Activator.CreateInstance(app.GetType("mRemoteNG.Connection.InterfaceControl", true), new object[] { container, direct, model });
+            bridge.GetType().GetProperty("OriginalInfo").SetValue(bridge, model);
+            direct.GetType().GetProperty("InterfaceControl").SetValue(direct, bridge);
+            Check((bool)direct.GetType().GetMethod("Initialize").Invoke(direct, null), "Apple direct mode incorrectly requires an SSH tunnel.");
+        } finally { ((IDisposable)direct).Dispose(); }
     }
     private static async Task TestVirtualServers(Form host, string artifacts)
     {
@@ -918,6 +929,13 @@ internal static class Program
             using (var image = new Bitmap(dialog.Width, dialog.Height)) { dialog.DrawToBitmap(image, new Rectangle(Point.Empty, dialog.Size)); image.Save(Path.Combine(artifacts, "gui-apple-connection.png")); }
             Field<Button>(dialog, "CreateConnection").PerformClick();
             Check(dialog.DialogResult == DialogResult.OK && Value(mac, "Protocol") == "ARD" && Value(mac, "Port") == "5900" && Value(mac, "VNCAuthMode") == "AppleARD" && Value(mac, "Username") == "mac-user", "Apple connection did not retain native protocol/account authentication.");
+        }
+        var directMac = NewModel();
+        using (var dialog = Open(directMac)) {
+            Field<ComboBox>(dialog, "Protocol").SelectedIndex = 3;
+            Field<TextBox>(dialog, "Hostname").Text = "direct-mac.invalid"; Field<TextBox>(dialog, "Username").Text = "mac-user";
+            Field<Button>(dialog, "CreateConnection").PerformClick();
+            Check(dialog.DialogResult == DialogResult.OK && Value(directMac, "SSHTunnelConnectionName") == "", "Apple creation made the optional SSH tunnel mandatory.");
         }
     }
 

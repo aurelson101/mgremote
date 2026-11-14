@@ -533,6 +533,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\Shared\LanDiscovery.cs" Link="Security\LanDiscovery.cs" />
     <ProjectReference Include="..\ExternalConnectors\ExternalConnectors.csproj" />
     <ProjectReference Include="..\mRemoteNG.PluginContracts\mRemoteNG.PluginContracts.csproj" />
     <ProjectReference Include="..\ObjectListView\ObjectListView.NetCore.csproj" />
