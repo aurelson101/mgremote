@@ -197,8 +197,9 @@ internal sealed class SshFileTransferForm : Form
         _working = true; _connect.Enabled = false;
         try {
             _session?.Dispose(); _session = null; _tunnel?.Dispose(); _tunnel = null; _remote.Items.Clear();
-            _status.Text = "Lecture de la configuration SSH…"; var settings = await ReadSettingsAsync(_lifetime.Token);
-            if (_authentication.SelectedIndex == 1) settings = settings with { Keys = Array.Empty<string>() };
+            bool passwordOnly = _authentication.SelectedIndex == 1;
+            _status.Text = "Lecture de la configuration SSH…"; var settings = await ReadSettingsAsync(_lifetime.Token, passwordOnly);
+            if (passwordOnly) settings = settings with { Keys = Array.Empty<string>() };
             string password = string.IsNullOrEmpty(_info.Password) ? null : _info.Password;
             if (settings.Keys.Length == 0 && password == null) password = AskPassword("Mot de passe SFTP — " + settings.User) ?? throw new OperationCanceledException();
             string host = settings.Host; int port = settings.Port;
@@ -229,9 +230,9 @@ internal sealed class SshFileTransferForm : Form
         store.SetValue(identity, pin, RegistryValueKind.String); return true;
     }
     private sealed record Settings(string Host, int Port, string User, string[] Keys);
-    private async Task<Settings> ReadSettingsAsync(CancellationToken token)
+    private async Task<Settings> ReadSettingsAsync(CancellationToken token, bool passwordOnly)
     {
-        var start = WindowsSecurityPolicy.BuildOpenSshStartInfo(_info.Hostname, _info.Username, _info.Port, _info.SSHOptions);
+        var start = WindowsSecurityPolicy.BuildOpenSshStartInfo(_info.Hostname, _info.Username, _info.Port, passwordOnly ? "" : _info.SSHOptions);
         start.Arguments = "-G " + start.Arguments; start.CreateNoWindow = true; start.RedirectStandardOutput = true; start.RedirectStandardError = true;
         using var process = Process.Start(start) ?? throw new IOException("Impossible de lire la configuration OpenSSH.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(10));
