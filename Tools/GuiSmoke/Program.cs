@@ -212,6 +212,7 @@ internal static class Program
         Check(await Scp(source, endpoint + "/binary.bin") == 0, "Loopback SFTP upload failed.");
         Check(await Scp(endpoint + "/binary.bin", downloaded) == 0 && File.ReadAllBytes(downloaded).SequenceEqual(bytes), "Loopback SFTP binary round trip failed.");
         Check(await Scp(source, endpoint + "/missing-parent/output.bin") != 0, "Loopback SFTP error was reported as success.");
+        await TestSftpBrowser(artifacts, lab);
         bool rdp = lab.GetProperty("RdpAvailable").GetBoolean();
         if (rdp) await TestVirtualRdp(host, lab);
         File.WriteAllText(Path.Combine(artifacts,"network-verification.json"), System.Text.Json.JsonSerializer.Serialize(new {
@@ -220,6 +221,78 @@ internal static class Program
             ProductionEndpointsModified=false
         },new System.Text.Json.JsonSerializerOptions { WriteIndented=true }));
         Console.WriteLine("PASS: application SSH terminal, pinned host key, real loopback SFTP binary round trip and transfer error; Windows Server RDP desktop=" + rdp);
+    }
+    private static async Task TestSftpBrowser(string artifacts, System.Text.Json.JsonElement lab)
+    {
+        var type = app.GetType("mRemoteNG.Security.SftpBrowserSession", true);
+        string root = lab.GetProperty("Root").GetString(), remoteRoot = lab.GetProperty("RemotePath").GetString();
+        byte[] hostKey = Convert.FromBase64String(File.ReadAllText(Path.Combine(root,"host.pub")).Split(' ')[1]);
+        Func<string, byte[], bool> trust = (_, key) => key.SequenceEqual(hostKey);
+        object Session(string password, string[] keys, Func<string,byte[],bool> verify) => Activator.CreateInstance(type, new object[] { "127.0.0.1", lab.GetProperty("SshPort").GetInt32(), lab.GetProperty("User").GetString(), password, keys, (Func<string,string>)(_ => throw new Exception("Unexpected encrypted fixture key.")), verify });
+        async Task Call(object session, string method, params object[] args) => await ((Task)type.GetMethod(method).Invoke(session,args)).WaitAsync(TimeSpan.FromSeconds(60));
+        using (var refused = (IDisposable)Session(null,new[]{Path.Combine(root,"client")},(_,_)=>false)) {
+            bool rejected=false;
+            try { await Call(refused,"ConnectAsync",CancellationToken.None); } catch (Exception) { rejected=true; }
+            Check(rejected,"SFTP browser accepted an untrusted host key.");
+        }
+        if (lab.TryGetProperty("SftpPassword",out var password)) {
+            using var passwordSession=(IDisposable)Session(password.GetString(),Array.Empty<string>(),trust);
+            await Call(passwordSession,"ConnectAsync",CancellationToken.None);
+        }
+        var session=Session(null,new[]{Path.Combine(root,"client")},trust);
+        await Call(session,"ConnectAsync",CancellationToken.None);
+        var model=Activator.CreateInstance(app.GetType("mRemoteNG.Connection.ConnectionInfo",true));
+        using var browser=(Form)Activator.CreateInstance(app.GetType("mRemoteNG.UI.Forms.SshFileTransferForm",true),new[]{model});
+        var formType=browser.GetType(); formType.GetField("_session",Fields).SetValue(browser,session);
+        browser.ShowInTaskbar=false; browser.Show();
+        string source=Path.Combine(root,"browser-source"),target=Path.Combine(root,"browser-download");
+        Directory.CreateDirectory(Path.Combine(source,"Lot été","sous dossier"));Directory.CreateDirectory(target);
+        byte[] binary=new byte[4*1024*1024];Random.Shared.NextBytes(binary);
+        File.WriteAllBytes(Path.Combine(source,"Lot été","sous dossier","binary.bin"),binary);
+        File.WriteAllBytes(Path.Combine(source,"Lot été","vide.txt"),Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(source,"notes é.txt"),"SFTP multiple files — UTF-8");
+        var local=(ListView)browser.Controls.Find("SftpLocalFiles",true)[0];var remote=(ListView)browser.Controls.Find("SftpRemoteFiles",true)[0];
+        var queue=(ListView)browser.Controls.Find("SftpQueue",true)[0];
+        Check(local.MultiSelect&&remote.MultiSelect&&local.AllowDrop&&remote.AllowDrop,"SFTP panes do not support multiple selection and mouse drops.");
+        browser.Controls.Find("TransferRemotePath",true)[0].Text=remoteRoot;
+        await ((Task)formType.GetMethod("BrowseLocalAsync",Fields).Invoke(browser,new object[]{source}));
+        var onDrop=typeof(Control).GetMethod("OnDragDrop",Fields);
+        int ticks=0;using var heartbeat=new System.Windows.Forms.Timer{Interval=25};heartbeat.Tick+=(_,_)=>ticks++;heartbeat.Start();
+        async Task Drain(int count,bool success) {
+            await ((Task)formType.GetField("_transfers",Fields).GetValue(browser)).WaitAsync(TimeSpan.FromSeconds(90));
+            Check(queue.Items.Count==count,"SFTP mouse drop lost selected items.");
+            Check(queue.Items[count-1].SubItems[3].Text.StartsWith(success?"Terminé":"Échec"),"Unexpected SFTP queue outcome: "+queue.Items[count-1].SubItems[3].Text);
+        }
+        string[] paths={Path.Combine(source,"Lot été"),Path.Combine(source,"notes é.txt")};
+        var upload=new DataObject();upload.SetData(DataFormats.FileDrop,paths);
+        onDrop.Invoke(remote,new object[]{new DragEventArgs(upload,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});
+        await Drain(2,true);Check(queue.Items[0].SubItems[3].Text=="Terminé","Recursive SFTP upload failed: "+queue.Items[0].SubItems[3].Text);
+        browser.Controls.Find("TransferLocalPath",true)[0].Text=target;
+        string[] remotePaths={remoteRoot.TrimEnd('/')+"/Lot été",remoteRoot.TrimEnd('/')+"/notes é.txt"};
+        var selection=Activator.CreateInstance(formType.GetNestedType("RemoteSelection",BindingFlags.NonPublic),new object[]{browser,remotePaths});
+        var download=new DataObject();download.SetData("MGRemote.Sftp.Selection",false,selection);
+        onDrop.Invoke(local,new object[]{new DragEventArgs(download,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});
+        await Drain(4,true);
+        Check(File.ReadAllBytes(Path.Combine(target,"Lot été","sous dossier","binary.bin")).SequenceEqual(binary),"SFTP browser binary folder round trip differs.");
+        Check(new FileInfo(Path.Combine(target,"Lot été","vide.txt")).Length==0&&File.ReadAllText(Path.Combine(target,"notes é.txt"))==File.ReadAllText(paths[1]),"Empty/Unicode/multiple SFTP files differ.");
+        var existing=new DataObject();existing.SetData(DataFormats.FileDrop,new[]{paths[1]});
+        onDrop.Invoke(remote,new object[]{new DragEventArgs(existing,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});await Drain(5,false);
+        var child=type.GetMethod("LocalChild",BindingFlags.Static|BindingFlags.NonPublic);
+        foreach(string invalid in new[]{"../escape","..\\escape","stream:ads","CON.txt","trailing.","bad\nname"}) {
+            bool rejected=false;try{child.Invoke(null,new object[]{target,invalid});}catch(TargetInvocationException){rejected=true;}
+            Check(rejected,"Unsafe downloaded SFTP name accepted: "+invalid);
+        }
+        using(var cancelled=new CancellationTokenSource()) {
+            cancelled.Cancel();bool rejected=false;
+            try{await Call(session,"TransferAsync",paths[1],remoteRoot,true,false,null,cancelled.Token);}catch(Exception){rejected=true;}
+            Check(rejected,"Cancelled SFTP transfer was executed.");
+        }
+        Check(ticks>0,"SFTP transfers blocked the GUI heartbeat.");
+        using(var image=new Bitmap(browser.Width,browser.Height)){browser.DrawToBitmap(image,new Rectangle(Point.Empty,browser.Size));image.Save(Path.Combine(artifacts,"gui-sftp-browser.png"));}
+        browser.Close();var deadline=DateTime.UtcNow.AddSeconds(10);while(!browser.IsDisposed&&DateTime.UtcNow<deadline)await Task.Delay(20);
+        Check(browser.IsDisposed,"SFTP browser did not close and release its worker.");
+        File.WriteAllText(Path.Combine(artifacts,"sftp-browser-verification.json"),System.Text.Json.JsonSerializer.Serialize(new{Result="PASS",TwoPanes=true,MultipleFilesAndRecursiveFolders=true,MouseDropHandlersBothDirections=true,ExternalExplorerUploadDrop=true,UnicodeAndBinaryAndEmptyFiles=true,HostKeyRejection=true,PasswordWithoutKey=lab.TryGetProperty("SftpPassword",out _),OverwriteRefusedByDefault=true,UnsafeNamesRejected=true,CancellationTested=true,UiHeartbeatTicks=ticks,PhysicalMouseTested=false},new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
+        Console.WriteLine("PASS: two-pane SFTP browser, multiple mouse-drop files/folders both ways, pinned host key, optional key, binary/Unicode/empty files, overwrite protection, cancellation and live GUI heartbeat.");
     }
     private static async Task TestVirtualRdp(Form host, System.Text.Json.JsonElement lab)
     {

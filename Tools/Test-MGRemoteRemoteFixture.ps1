@@ -64,6 +64,7 @@ $account.SetPassword($password);$account.Put('UserFlags',0x10200);$account.SetIn
 $userSid=[Security.Principal.NTAccount]::new($env:COMPUTERNAME,$user).Translate([Security.Principal.SecurityIdentifier]).Value
 Add-FixtureGroup 'S-1-5-32-545'
 $script:state=@{Root=$root;User=$user;Sid=$userSid;Task=('MGRemoteFixture-'+$id);SshPort=(Free-Port);RdpAvailable=$false;Firewall=@()}
+$state.SftpPassword=$password
 Save-State
 $arch=[Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
 $zipName=if ($arch -eq 'Arm64') {'OpenSSH-ARM64.zip'} else {'OpenSSH-Win64.zip'}
@@ -83,6 +84,8 @@ $binAcl=Get-Acl $bin
 $binAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($userSid),'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'));Set-Acl $bin $binAcl
 $remote=Join-Path $root 'remote';New-Item -ItemType Directory $remote | Out-Null
 $remoteAcl=Get-Acl $remote;$remoteAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($userSid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'));Set-Acl $remote $remoteAcl
+# Permit listing this directory only. Private key files retain their original ACLs.
+$browseAcl=Get-Acl $root;$browseAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($userSid),'ReadAndExecute','Allow'));Set-Acl $root $browseAcl
 $state.ScpExecutable=Join-Path $bin 'scp.exe';$state.RemotePath=$remote.Replace('\','/');Save-State
 
 $r=$root.Replace('\','/');$b=$bin.Replace('\','/')
@@ -93,7 +96,7 @@ HostKey "$r/host"
 PidFile "$r/sshd.pid"
 AuthorizedKeysFile "$r/client.pub"
 StrictModes no
-PasswordAuthentication no
+PasswordAuthentication yes
 PubkeyAuthentication yes
 AllowUsers $user
 Subsystem sftp "$b/sftp-server.exe"
@@ -126,22 +129,28 @@ if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
     $block='MGRemoteBlock-'+$id;$allow='MGRemoteLoopback-'+$id;$state.Firewall=@($block,$allow);Save-State
     New-NetFirewallRule -Name $block -DisplayName $block -Direction Inbound -Action Block -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff') | Out-Null
     New-NetFirewallRule -Name $allow -DisplayName $allow -Direction Inbound -Action Allow -Protocol TCP -LocalPort $state.RdpPort -RemoteAddress '127.0.0.1' | Out-Null
-    Write-Host 'Creating isolated RDP certificate in native Windows PowerShell.'
-    # Keep private-key creation/access in the native PKI runtime. Only the public
-    # thumbprint crosses into pwsh; no private-key object is remoted or serialized.
-    $certificateScript=Join-Path $root 'certificate.ps1'
-    @'
-$ErrorActionPreference='Stop'
-$security=[Security.AccessControl.FileSecurity]::new()
-$security.SetAccessRuleProtection($true,$false)
-foreach ($sid in @('S-1-5-18','S-1-5-32-544')) { $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','Allow')) }
-$security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'))
-(New-SelfSignedCertificate -DnsName localhost -CertStoreLocation Cert:\LocalMachine\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -SecurityDescriptor $security -NotAfter (Get-Date).AddHours(2)).Thumbprint
-'@ | Set-Content -LiteralPath $certificateScript -Encoding UTF8
-    $thumbprint=& "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -File $certificateScript
-    if ($LASTEXITCODE -ne 0 -or "$thumbprint" -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Isolated certificate creation failed.' }
-    $state.Cert="$thumbprint";Save-State
-    $cert=Get-Item ('Cert:\LocalMachine\My\'+$state.Cert)
+    Write-Host 'Creating an isolated RDP certificate with the native .NET API.'
+    $creation=[Security.Cryptography.CngKeyCreationParameters]::new()
+    $creation.Provider=[Security.Cryptography.CngProvider]::MicrosoftSoftwareKeyStorageProvider
+    $creation.KeyCreationOptions=[Security.Cryptography.CngKeyCreationOptions]::MachineKey
+    $creation.Parameters.Add([Security.Cryptography.CngProperty]::new('Length',[BitConverter]::GetBytes([int]2048),[Security.Cryptography.CngPropertyOptions]::None))
+    $key=[Security.Cryptography.CngKey]::Create([Security.Cryptography.CngAlgorithm]::Rsa,('MGRemoteFixture-'+$id),$creation)
+    $rsa=[Security.Cryptography.RSACng]::new($key)
+    try {
+        $request=[Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=localhost',$rsa,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $san=[Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new();$san.AddDnsName('localhost');$request.CertificateExtensions.Add($san.Build())
+        $oids=[Security.Cryptography.OidCollection]::new();$null=$oids.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.1'))
+        $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($oids,$false))
+        $cert=$request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-5),[DateTimeOffset]::UtcNow.AddHours(2))
+        $keyName=$key.UniqueName
+        if (!$keyName -or [IO.Path]::GetFileName($keyName) -ne $keyName) { throw 'Invalid isolated key container.' }
+        $keyFile=Join-Path $env:ProgramData ('Microsoft\Crypto\Keys\'+$keyName)
+        if (!(Test-Path -LiteralPath $keyFile -PathType Leaf)) { throw 'The isolated key file is missing.' }
+        $keyAcl=Get-Acl $keyFile;$keyAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-20'),'Read','Allow'));Set-Acl $keyFile $keyAcl
+        $machineStore=[Security.Cryptography.X509Certificates.X509Store]::new('My','LocalMachine')
+        try { $machineStore.Open('ReadWrite');$machineStore.Add($cert) } finally { $machineStore.Close() }
+        $state.Cert=$cert.Thumbprint;Save-State
+    } catch { $key.Delete();throw } finally { $rsa.Dispose();$key.Dispose() }
     $store=[Security.Cryptography.X509Certificates.X509Store]::new('Root','CurrentUser');$store.Open('ReadWrite');$store.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData));$store.Close()
     Write-Host 'Binding isolated RDP certificate.'
     $state.RdpChanged=$true;Save-State

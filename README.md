@@ -24,7 +24,7 @@ Actual Windows interface captured during GUI validation with synthetic data. No 
 - Integrated ANSI/VT SSH terminal using Windows OpenSSH, ConPTY and locally bundled xterm.js. Imported SSH2 connections use this terminal even if their saved backend still says PuTTYNG.
 - Optional OpenSSH/PEM private keys, native interactive passphrase/password prompts, OpenSSH profiles and managed SSH bastion tunnels.
 - SSH copy/paste with Ctrl+Shift+C / Ctrl+Shift+V or the context menu. Multiline paste requires confirmation; Ctrl+C remains an interrupt.
-- Bidirectional file/folder transfer through the dedicated SFTP transfer window. Files are not pasted into the remote shell as commands.
+- Two-pane SFTP browser with local/remote navigation, multiple selection, recursive folders, a transfer queue, progress and cancellation. Drag files/folders between the panes in either direction, or from Windows Explorer onto the remote pane. Password authentication is available without a private key. Existing files are preserved unless replacement is explicitly enabled; links/junctions are not followed.
 - RDP certificate policy: strict validation by default, or explicit native certificate confirmation with **Warn if authentication fails**. CredSSP/NLA stays enabled.
 - Explicit RDP clipboard and selected-drive sharing controls, plus monitor and window-placement recovery. Sharing changes require reconnection; server policies may restrict them.
 - mRemoteNG XML import, optional external AnyDesk integration and Windows MSI maintenance/upgrade support.
