@@ -249,6 +249,16 @@ internal static class Program
         using var browser=(Form)Activator.CreateInstance(app.GetType("mRemoteNG.UI.Forms.SshFileTransferForm",true),new[]{model});
         var formType=browser.GetType(); formType.GetField("_session",Fields).SetValue(browser,session);
         browser.ShowInTaskbar=false; browser.Show();
+        Size originalSize=browser.ClientSize;
+        foreach(var size in new[]{new Size(760,510),originalSize}) {
+            browser.ClientSize=size;Application.DoEvents();
+            var controls=new Stack<Control>();controls.Push(browser);
+            while(controls.TryPop(out var control)) {
+                foreach(Control child in control.Controls)controls.Push(child);
+                if(control is TextBox or Button && control.Parent is TableLayoutPanel)
+                    Check(control.Left>=0&&control.Right<=control.Parent.ClientSize.Width+1,"SFTP navigation is clipped at "+size+": "+control.Name+" "+control.Text);
+            }
+        }
         string source=Path.Combine(root,"browser-source"),target=Path.Combine(root,"browser-download");
         Directory.CreateDirectory(Path.Combine(source,"Lot été","sous dossier"));Directory.CreateDirectory(target);
         byte[] binary=new byte[4*1024*1024];Random.Shared.NextBytes(binary);
