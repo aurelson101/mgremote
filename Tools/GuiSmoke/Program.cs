@@ -199,6 +199,14 @@ internal static class Program
             var bridge = (Control)Activator.CreateInstance(app.GetType("mRemoteNG.Connection.InterfaceControl", true), new object[] { container, protocol, model });
             bridge.GetType().GetProperty("OriginalInfo").SetValue(bridge, model);
             var ssh = Activator.CreateInstance(modelType); modelType.GetProperty("Hostname").SetValue(ssh, "simulated-mac.invalid");
+            modelType.GetProperty("Protocol").SetValue(ssh, Enum.Parse(modelType.GetProperty("Protocol").PropertyType, "SSH2"));
+            var destination = app.GetType("mRemoteNG.Connection.ConnectionInitiator", true).GetMethod("GetTunnelDestination", BindingFlags.Static | BindingFlags.NonPublic);
+            Check((string)destination.Invoke(null, new[] { model, ssh }) == "127.0.0.1", "Apple tunnel did not terminate on the authenticated Mac's loopback interface.");
+            modelType.GetProperty("Hostname").SetValue(ssh, "different-mac.invalid");
+            bool rejected = false;
+            try { destination.Invoke(null, new[] { model, ssh }); } catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException) { rejected = true; }
+            Check(rejected, "Apple connection accepted a different SSH endpoint.");
+            modelType.GetProperty("Hostname").SetValue(ssh, "simulated-mac.invalid");
             bridge.GetType().GetProperty("SSHTunnelInfo").SetValue(bridge, ssh);
             protocol.GetType().GetProperty("InterfaceControl").SetValue(protocol, bridge);
             Check((bool)protocol.GetType().GetMethod("Initialize").Invoke(protocol, null), "The native Apple desktop control did not initialize.");

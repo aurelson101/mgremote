@@ -124,7 +124,7 @@ namespace mRemoteNG.Connection
                     {
                         if (connectionInfoOriginal.Protocol is not (ProtocolType.RDP or ProtocolType.SSH2 or ProtocolType.VNC or ProtocolType.ARD))
                             throw new InvalidOperationException("Le tunnel OpenSSH intégré prend en charge SSH2, RDP et VNC.");
-                        string destination = connectionInfoOriginal.Hostname;
+                        string destination = GetTunnelDestination(connectionInfoOriginal, connectionInfoSshTunnel);
                         using var startupCancellation = new CancellationTokenSource();
                         EventHandler cancel = (_, _) => startupCancellation.Cancel();
                         FormClosedEventHandler cancelMain = (_, _) => startupCancellation.Cancel();
@@ -301,6 +301,17 @@ namespace mRemoteNG.Connection
         }
 
         // recursively traverse the tree to find ConnectionInfo of a specific name
+        internal static string GetTunnelDestination(ConnectionInfo target, ConnectionInfo ssh)
+        {
+            bool apple = target.Protocol == ProtocolType.ARD || target.Protocol == ProtocolType.VNC &&
+                target.VNCAuthMode == mRemoteNG.Connection.Protocol.VNC.ProtocolVNC.AuthMode.AppleARD;
+            if (!apple) return target.Hostname;
+            if (ssh == null || ssh.Protocol != ProtocolType.SSH2 ||
+                !string.Equals(ssh.Hostname, target.Hostname, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Apple Remote Desktop : utilisez une connexion SSH2 vers exactement la même adresse de Mac.");
+            return "127.0.0.1";
+        }
+
         internal static ConnectionInfo getSSHConnectionInfoByName(IEnumerable<ConnectionInfo> rootnodes, string SSHTunnelConnectionName)
         {
             static IEnumerable<ConnectionInfo> Enumerate(IEnumerable<ConnectionInfo> nodes) {
