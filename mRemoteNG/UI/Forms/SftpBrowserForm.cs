@@ -160,7 +160,7 @@ internal sealed class SshFileTransferForm : Form
     private RemoteSelection RemoteData(IDataObject data)
     {
         if (_draggedRemote == null || data?.GetDataPresent(RemoteFormat, false) != true) return null;
-        return data.GetData(RemoteFormat, false) is MemoryStream { Length: <= 128 } bytes && Encoding.ASCII.GetString(bytes.ToArray()) == _dragToken ? _draggedRemote : null;
+        return data.GetData(RemoteFormat, false) is MemoryStream { Length: <= 128 } bytes && Encoding.ASCII.GetString(bytes.ToArray()).TrimEnd('\0') == _dragToken ? _draggedRemote : null;
     }
     private static string DropDirectory(ListView list, string fallback, DragEventArgs e) => list.GetItemAt(list.PointToClient(new Point(e.X, e.Y)).X, list.PointToClient(new Point(e.X, e.Y)).Y)?.Tag is SftpEntry { Directory: true, Link: false } folder ? folder.Path : fallback;
     private void Enqueue(string[] paths, string destination, bool upload)

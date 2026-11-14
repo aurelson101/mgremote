@@ -33,6 +33,10 @@ internal static class Program
     private static object adder;
     private static MethodInfo add;
     [DllImport("user32.dll")] private static extern int GetGuiResources(IntPtr process, int flags);
+    [DllImport("kernel32.dll")] private static extern IntPtr GlobalLock(IntPtr memory);
+    [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(IntPtr memory);
+    [DllImport("kernel32.dll")] private static extern UIntPtr GlobalSize(IntPtr memory);
+    [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref System.Runtime.InteropServices.ComTypes.STGMEDIUM medium);
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference CreateAndDispose(int index)
@@ -272,6 +276,15 @@ internal static class Program
         var selection=Activator.CreateInstance(formType.GetNestedType("RemoteSelection",BindingFlags.NonPublic),new object[]{browser,remotePaths});
         formType.GetField("_draggedRemote",Fields).SetValue(browser,selection);
         var download=new DataObject();download.SetData("MGRemote.Sftp.Selection",false,new MemoryStream(System.Text.Encoding.ASCII.GetBytes((string)formType.GetField("_dragToken",Fields).GetValue(browser))));
+        var format=new System.Runtime.InteropServices.ComTypes.FORMATETC{cfFormat=unchecked((short)DataFormats.GetFormat("MGRemote.Sftp.Selection").Id),dwAspect=System.Runtime.InteropServices.ComTypes.DVASPECT.DVASPECT_CONTENT,lindex=-1,tymed=System.Runtime.InteropServices.ComTypes.TYMED.TYMED_HGLOBAL};
+        ((System.Runtime.InteropServices.ComTypes.IDataObject)download).GetData(ref format,out var medium);
+        try {
+            ulong size=GlobalSize(medium.unionmember).ToUInt64();Check(size>0&&size<=128,"Remote SFTP drag did not expose a bounded native OLE stream.");
+            IntPtr memory=GlobalLock(medium.unionmember);Check(memory!=IntPtr.Zero,"OLE drag memory could not be read.");
+            byte[] data=new byte[(int)size];try{Marshal.Copy(memory,data,0,data.Length);}finally{GlobalUnlock(medium.unionmember);}
+            // Reconstruct the receiver's data from the actual native OLE payload.
+            download=new DataObject();download.SetData("MGRemote.Sftp.Selection",false,new MemoryStream(data));
+        } finally { ReleaseStgMedium(ref medium); }
         onDrop.Invoke(local,new object[]{new DragEventArgs(download,1,-10000,-10000,DragDropEffects.Copy,DragDropEffects.Copy)});
         await Drain(4,true);
         Check(File.ReadAllBytes(Path.Combine(target,"Lot été","sous dossier","binary.bin")).SequenceEqual(binary),"SFTP browser binary folder round trip differs.");
