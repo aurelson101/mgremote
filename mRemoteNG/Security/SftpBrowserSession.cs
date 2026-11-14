@@ -1,5 +1,6 @@
 // MGRemote modification. GPL-2.0; see COPYING.txt.
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -18,7 +19,6 @@ internal sealed record SftpProgress(string File, long Bytes, long Total);
 // One worker at a time owns the connection; neither listing nor transfers block WinForms.
 internal sealed class SftpBrowserSession : IDisposable
 {
-    private sealed class InlineProgress<T>(Action<T> action) : IProgress<T> { public void Report(T value) => action(value); }
     private readonly SftpClient _client;
     private readonly Renci.SshNet.ConnectionInfo _connection;
     private readonly List<PrivateKeyFile> _keys = new();
@@ -101,10 +101,11 @@ internal sealed class SftpBrowserSession : IDisposable
             string temporary = remote + ".mgremote-" + Guid.NewGuid().ToString("N") + ".part";
             string backup = null;
             try {
-                using (var input = new FileStream(local, FileMode.Open, FileAccess.Read, FileShare.Read)) {
-                    var report = Reporter(local, input.Length);
-                    _client.UploadFileAsync(input, temporary, false, new InlineProgress<UploadFileProgressReport>(p => report((ulong)p.TotalBytesUploaded)), token).GetAwaiter().GetResult();
-                }
+                // Closing the owned stream also closes the server handle when a
+                // copy is cancelled; otherwise Windows cannot remove staging files.
+                using (var input = new FileStream(local, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var output = _client.Open(temporary, FileMode.CreateNew, FileAccess.Write))
+                    CopyAsync(input, output, Reporter(local, input.Length)).GetAwaiter().GetResult();
                 token.ThrowIfCancellationRequested();
                 if (_client.Exists(remote)) {
                     var existing = Inspect(remote);
@@ -139,10 +140,9 @@ internal sealed class SftpBrowserSession : IDisposable
             if (File.Exists(local)) { ValidateLocalPath(local); if (!overwrite) throw new IOException("Le fichier existe déjà (remplacement désactivé) : " + local); }
             string temporary = Path.Combine(localDirectory, ".mgremote-" + Guid.NewGuid().ToString("N") + ".part");
             try {
-                using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
-                    var report = Reporter(remote, file.Length);
-                    _client.DownloadFileAsync(remote, output, new InlineProgress<DownloadFileProgressReport>(p => report((ulong)p.TotalBytesDownloaded)), token).GetAwaiter().GetResult();
-                }
+                using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                using (var input = _client.OpenRead(remote))
+                    CopyAsync(input, output, Reporter(remote, file.Length)).GetAwaiter().GetResult();
                 token.ThrowIfCancellationRequested();
                 ValidateLocalDirectory(localDirectory);
                 if (File.Exists(local)) ValidateLocalPath(local);
@@ -152,6 +152,16 @@ internal sealed class SftpBrowserSession : IDisposable
         Action<ulong> Reporter(string path, long length) {
             var clock = Stopwatch.StartNew(); progress?.Report(new SftpProgress(path, 0, length));
             return count => { lock (clock) { if (clock.ElapsedMilliseconds >= 100 || count == (ulong)length) { progress?.Report(new SftpProgress(path, (long)Math.Min(count, (ulong)long.MaxValue), length)); clock.Restart(); } } };
+        }
+        async Task CopyAsync(Stream input, Stream output, Action<ulong> report) {
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(65536); ulong copied = 0;
+            try {
+                int count;
+                while ((count = await input.ReadAsync(buffer.AsMemory(0, 65536), token).ConfigureAwait(false)) != 0) {
+                    await output.WriteAsync(buffer.AsMemory(0, count), token).ConfigureAwait(false);
+                    copied += (ulong)count; report(copied);
+                }
+            } finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
         }
     }, token);
 
